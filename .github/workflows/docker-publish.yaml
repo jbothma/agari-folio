@@ -9,7 +9,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: ${{ github.repository_owner }}/agari-folio
 
 jobs:
   build-and-push:
@@ -32,11 +32,18 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
+    - name: Debug information
+      run: |
+        echo "Actor: ${{ github.actor }}"
+        echo "Repository: ${{ github.repository }}"
+        echo "Image name: ${{ env.IMAGE_NAME }}"
+        echo "Lowercase image: $(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')"
+
     - name: Extract metadata
       id: meta
       uses: docker/metadata-action@v5
       with:
-        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        images: ${{ env.REGISTRY }}/$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')
         tags: |
           type=ref,event=branch
           type=ref,event=pr
