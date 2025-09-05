@@ -175,7 +175,7 @@ def setup_project_endpoints(api, projects_ns):
     # Define project models for Swagger
     project_model = api.model('Project', {
         'id': fields.String(description='Project UUID (auto-generated)', readonly=True),
-        'code': fields.String(required=True, description='Project code (unique identifier)'),
+        'slug': fields.String(required=True, description='Project slug (unique identifier)'),
         'name': fields.String(required=True, description='Project name'),
         'description': fields.String(description='Project description'),
         'pathogen_id': fields.String(description='Associated pathogen UUID'),
@@ -185,7 +185,7 @@ def setup_project_endpoints(api, projects_ns):
     })
 
     project_input_model = api.model('ProjectInput', {
-        'code': fields.String(required=True, description='Project code (must be unique)'),
+        'slug': fields.String(required=True, description='Project slug (must be unique)'),
         'name': fields.String(required=True, description='Project name'),
         'description': fields.String(description='Project description'),
         'pathogen_id': fields.String(description='Associated pathogen UUID')
@@ -205,7 +205,7 @@ def setup_project_endpoints(api, projects_ns):
                 
                 # Get all active projects with pathogen names
                 cur.execute("""
-                    SELECT p.id, p.code, p.name, p.description, p.pathogen_id, p.created_at, p.updated_at,
+                    SELECT p.id, p.slug, p.name, p.description, p.pathogen_id, p.created_at, p.updated_at,
                            path.name as pathogen_name
                     FROM projects p
                     LEFT JOIN pathogens path ON p.pathogen_id = path.id AND path.deleted_at IS NULL
@@ -242,8 +242,8 @@ def setup_project_endpoints(api, projects_ns):
                 data = projects_ns.payload
                 
                 # Validate required fields
-                if not data or not data.get('code') or not data.get('name'):
-                    return {"error": "Project code and name are required"}, 400
+                if not data or not data.get('slug') or not data.get('name'):
+                    return {"error": "Project slug and name are required"}, 400
                 
                 # Generate UUID for project
                 project_id = str(uuid.uuid4())
@@ -251,15 +251,15 @@ def setup_project_endpoints(api, projects_ns):
                 conn = get_db_connection()
                 cur = conn.cursor(cursor_factory=RealDictCursor)
                 
-                # Check if project code already exists
-                cur.execute("SELECT id FROM projects WHERE code = %s AND deleted_at IS NULL", 
-                           (data['code'],))
+                # Check if project slug already exists
+                cur.execute("SELECT id FROM projects WHERE slug = %s AND deleted_at IS NULL", 
+                           (data['slug'],))
                 existing = cur.fetchone()
                 
                 if existing:
                     cur.close()
                     conn.close()
-                    return {"error": f"Project with code '{data['code']}' already exists"}, 409
+                    return {"error": f"Project with slug '{data['slug']}' already exists"}, 409
                 
                 # Validate pathogen_id if provided
                 pathogen_name = None
@@ -277,15 +277,17 @@ def setup_project_endpoints(api, projects_ns):
                 
                 # Insert new project
                 cur.execute("""
-                    INSERT INTO projects (id, code, name, description, pathogen_id, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
-                    RETURNING id, code, name, description, pathogen_id, created_at, updated_at
+                    INSERT INTO projects (id, slug, name, description, pathogen_id, organization_id, user_id, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                    RETURNING id, slug, name, description, pathogen_id, created_at, updated_at
                 """, (
                     project_id,
-                    data['code'],
+                    data['slug'],
                     data['name'],
                     data.get('description'),
-                    data.get('pathogen_id')
+                    data.get('pathogen_id'),
+                    'default-org',  # TODO: Get from user context
+                    g.user.get('sub', 'unknown')  # User ID from token
                 ))
                 
                 new_project = cur.fetchone()
@@ -299,17 +301,17 @@ def setup_project_endpoints(api, projects_ns):
                 
                 # Create Keycloak resource and groups for project (optional - log if fails)
                 try:
-                    resource = create_project_resource(data['code'])
+                    resource = create_project_resource(data['slug'])
                     if resource:
-                        logger.info(f"Created Keycloak resource for project: {data['code']}")
+                        logger.info(f"Created Keycloak resource for project: {data['slug']}")
                         
                         # Create permission groups
                         for permission in ['read', 'write', 'admin']:
-                            create_project_group_with_permission(data['code'], permission)
+                            create_project_group_with_permission(data['slug'], permission)
                 except Exception as e:
-                    logger.warning(f"Failed to create Keycloak resources for project {data['code']}: {e}")
+                    logger.warning(f"Failed to create Keycloak resources for project {data['slug']}: {e}")
                 
-                logger.info(f"Created project '{data['code']}' by user: {g.user['username']}")
+                logger.info(f"Created project '{data['slug']}' by user: {g.user['username']}")
                 return result, 201
                 
             except Exception as e:
@@ -331,7 +333,7 @@ def setup_project_endpoints(api, projects_ns):
                 cur = conn.cursor(cursor_factory=RealDictCursor)
                 
                 cur.execute("""
-                    SELECT p.id, p.code, p.name, p.description, p.pathogen_id, p.created_at, p.updated_at,
+                    SELECT p.id, p.slug, p.name, p.description, p.pathogen_id, p.created_at, p.updated_at,
                            path.name as pathogen_name
                     FROM projects p
                     LEFT JOIN pathogens path ON p.pathogen_id = path.id AND path.deleted_at IS NULL
@@ -372,7 +374,7 @@ def setup_project_endpoints(api, projects_ns):
                 cur = conn.cursor(cursor_factory=RealDictCursor)
                 
                 # Check if project exists
-                cur.execute("SELECT code FROM projects WHERE id = %s AND deleted_at IS NULL", (project_id,))
+                cur.execute("SELECT slug FROM projects WHERE id = %s AND deleted_at IS NULL", (project_id,))
                 existing = cur.fetchone()
                 
                 if not existing:
@@ -380,16 +382,16 @@ def setup_project_endpoints(api, projects_ns):
                     conn.close()
                     return {"error": "Project not found"}, 404
                 
-                # If code is being changed, check for uniqueness
-                if 'code' in data and data['code'] != existing['code']:
-                    cur.execute("SELECT id FROM projects WHERE code = %s AND deleted_at IS NULL AND id != %s", 
-                               (data['code'], project_id))
+                # If slug is being changed, check for uniqueness
+                if 'slug' in data and data['slug'] != existing['slug']:
+                    cur.execute("SELECT id FROM projects WHERE slug = %s AND deleted_at IS NULL AND id != %s", 
+                               (data['slug'], project_id))
                     duplicate = cur.fetchone()
                     
                     if duplicate:
                         cur.close()
                         conn.close()
-                        return {"error": f"Project with code '{data['code']}' already exists"}, 409
+                        return {"error": f"Project with slug '{data['slug']}' already exists"}, 409
                 
                 # Validate pathogen_id if provided
                 if 'pathogen_id' in data and data['pathogen_id']:
@@ -406,7 +408,7 @@ def setup_project_endpoints(api, projects_ns):
                 update_fields = []
                 values = []
                 
-                for field in ['code', 'name', 'description', 'pathogen_id']:
+                for field in ['slug', 'name', 'description', 'pathogen_id']:
                     if field in data:
                         update_fields.append(f"{field} = %s")
                         values.append(data[field])
@@ -466,7 +468,7 @@ def setup_project_endpoints(api, projects_ns):
                 cur = conn.cursor(cursor_factory=RealDictCursor)
                 
                 # Check if project exists
-                cur.execute("SELECT code FROM projects WHERE id = %s AND deleted_at IS NULL", (project_id,))
+                cur.execute("SELECT slug FROM projects WHERE id = %s AND deleted_at IS NULL", (project_id,))
                 project = cur.fetchone()
                 
                 if not project:

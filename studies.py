@@ -55,7 +55,7 @@ def setup_study_endpoints(api, studies_ns):
                 # Get all active studies with project and pathogen information
                 cur.execute("""
                     SELECT s.id, s.name, s.description, s.project_id, s.created_at, s.updated_at,
-                           p.code as project_code, p.name as project_name, p.pathogen_id,
+                           p.slug as project_code, p.name as project_name, p.pathogen_id,
                            path.name as pathogen_name
                     FROM studies s
                     LEFT JOIN projects p ON s.project_id = p.id AND p.deleted_at IS NULL
@@ -103,7 +103,7 @@ def setup_study_endpoints(api, studies_ns):
                 
                 # Validate project_id and get project info
                 cur.execute("""
-                    SELECT p.code, p.name, p.pathogen_id, path.name as pathogen_name
+                    SELECT p.slug, p.name, p.pathogen_id, path.name as pathogen_name
                     FROM projects p
                     LEFT JOIN pathogens path ON p.pathogen_id = path.id AND path.deleted_at IS NULL
                     WHERE p.id = %s AND p.deleted_at IS NULL
@@ -134,7 +134,7 @@ def setup_study_endpoints(api, studies_ns):
                 
                 # Add project and pathogen info to response
                 result = serialize_record(new_study)
-                result['project_code'] = project['code']
+                result['project_code'] = project['slug']
                 result['project_name'] = project['name']
                 result['pathogen_id'] = project['pathogen_id']
                 result['pathogen_name'] = project['pathogen_name']
@@ -162,7 +162,7 @@ def setup_study_endpoints(api, studies_ns):
                 
                 cur.execute("""
                     SELECT s.id, s.name, s.description, s.project_id, s.created_at, s.updated_at,
-                           p.code as project_code, p.name as project_name, p.pathogen_id,
+                           p.slug as project_code, p.name as project_name, p.pathogen_id,
                            path.name as pathogen_name
                     FROM studies s
                     LEFT JOIN projects p ON s.project_id = p.id AND p.deleted_at IS NULL
@@ -215,7 +215,7 @@ def setup_study_endpoints(api, studies_ns):
                 project_info = None
                 if 'project_id' in data and data['project_id']:
                     cur.execute("""
-                        SELECT p.code, p.name, p.pathogen_id, path.name as pathogen_name
+                        SELECT p.slug, p.name, p.pathogen_id, path.name as pathogen_name
                         FROM projects p
                         LEFT JOIN pathogens path ON p.pathogen_id = path.id AND path.deleted_at IS NULL
                         WHERE p.id = %s AND p.deleted_at IS NULL
@@ -256,7 +256,7 @@ def setup_study_endpoints(api, studies_ns):
                 # Get current project info if not provided in update
                 if not project_info and updated_study['project_id']:
                     cur.execute("""
-                        SELECT p.code, p.name, p.pathogen_id, path.name as pathogen_name
+                        SELECT p.slug, p.name, p.pathogen_id, path.name as pathogen_name
                         FROM projects p
                         LEFT JOIN pathogens path ON p.pathogen_id = path.id AND path.deleted_at IS NULL
                         WHERE p.id = %s AND p.deleted_at IS NULL
@@ -270,7 +270,7 @@ def setup_study_endpoints(api, studies_ns):
                 # Add project and pathogen info to response
                 result = serialize_record(updated_study)
                 if project_info:
-                    result['project_code'] = project_info['code']
+                    result['project_code'] = project_info['slug']
                     result['project_name'] = project_info['name']
                     result['pathogen_id'] = project_info['pathogen_id']
                     result['pathogen_name'] = project_info['pathogen_name']
