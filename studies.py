@@ -201,7 +201,7 @@ def create_study_policy(study_id, permission, group_id):
             'description': f'Policy for {permission} access to study {study_id}',
             'type': 'group',
             'logic': 'POSITIVE',
-            'decisionStrategy': 'UNANIMOUS',
+            'decisionStrategy': 'POSITIVE',
             'groups': [{'id': group_id, 'extendChildren': False}]
         }
         
@@ -269,7 +269,7 @@ def create_study_permission(study_id, permission, resource_id, policy_id, scopes
             'description': f'Permission for {permission} access to study {study_id}',
             'type': 'resource',
             'logic': 'POSITIVE',
-            'decisionStrategy': 'UNANIMOUS',
+            'decisionStrategy': 'POSITIVE',
             'resources': [resource_id],
             'policies': [policy_id],
             'scopes': scopes
