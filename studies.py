@@ -83,11 +83,12 @@ def create_study_resource(study_id):
         }
         
         # Create the resource using UMA Resource Registration API
+        # SONG expects scopes in format: STUDY.{study_id}.WRITE
         resource_data = {
             'name': study_id,
             'displayName': f"Study: {study_id}",
             'type': 'urn:folio:resources:study',
-            'scopes': ['READ', 'WRITE'],
+            'scopes': [f'STUDY.{study_id}.READ', f'STUDY.{study_id}.WRITE'],
             'attributes': {
                 'study_id': [study_id],
                 'created_by': ['folio-service']
@@ -512,9 +513,9 @@ def setup_study_endpoints(api, studies_ns):
                                 policy_id = policy.get('id')
                                 scopes = []
                                 if permission == 'read':
-                                    scopes = ['READ']
+                                    scopes = [f'STUDY.{data["study_id"]}.READ']
                                 elif permission == 'write':
-                                    scopes = ['READ', 'WRITE']
+                                    scopes = [f'STUDY.{data["study_id"]}.READ', f'STUDY.{data["study_id"]}.WRITE']
                                 
                                 create_study_permission(data['study_id'], permission, resource_id, policy_id, scopes)
                     

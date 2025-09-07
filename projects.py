@@ -44,7 +44,7 @@ def create_project_resource(project_code):
             'name': project_code,
             'displayName': f"Project: {project_code}",
             'type': 'urn:folio:resources:project',
-            'scopes': ['READ', 'WRITE', 'ADMIN'],
+            'scopes': ['folio.READ', 'folio.WRITE', 'folio.ADMIN'],
             'attributes': {
                 'project_code': [project_code],
                 'created_by': ['folio-service']
@@ -544,11 +544,11 @@ def setup_project_endpoints(api, projects_ns):
                                 policy_id = policy.get('id')
                                 scopes = []
                                 if permission == 'read':
-                                    scopes = ['READ']
+                                    scopes = ['folio.READ']
                                 elif permission == 'write':
-                                    scopes = ['READ', 'WRITE']
+                                    scopes = ['folio.READ', 'folio.WRITE']
                                 elif permission == 'admin':
-                                    scopes = ['READ', 'WRITE', 'ADMIN']
+                                    scopes = ['folio.READ', 'folio.WRITE', 'folio.ADMIN']
                                 
                                 create_project_permission(data['slug'], permission, resource_id, policy_id, scopes)
                     
