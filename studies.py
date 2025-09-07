@@ -351,6 +351,126 @@ def add_creator_to_study_write_group(study_id, username):
     return add_user_to_study_group_with_permission(study_id, username, 'write')
 
 
+def remove_user_from_study_group_with_permission(study_id, username, permission):
+    """Remove a user from a study group with specific permission (read or write)"""
+    try:
+        group_name = f"study-{study_id}-{permission}"
+        logger.info(f"=== REMOVING USER '{username}' FROM {permission.upper()} GROUP '{group_name}' ===")
+        
+        # Import auth functions we need
+        from auth import get_project_group_by_name, get_user_by_username, get_service_token
+        
+        # Get the specific permission group (reuse the project function since it's generic)
+        group = get_project_group_by_name(group_name)
+        if not group:
+            logger.error(f"Study {permission} group '{group_name}' not found")
+            return False
+        
+        # Get the user
+        user = get_user_by_username(username)
+        if not user:
+            logger.error(f"User '{username}' not found")
+            return False
+        
+        service_token = get_service_token()
+        if not service_token:
+            return False
+        
+        headers = {
+            'Authorization': f'Bearer {service_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        group_id = group['id']
+        user_id = user['id']
+        
+        # Remove user from group
+        response = requests.delete(f"{KEYCLOAK_ADMIN_BASE_URI}/users/{user_id}/groups/{group_id}", 
+                                 headers=headers, timeout=10)
+        
+        if response.status_code == 204:
+            logger.info(f"Successfully removed user '{username}' from {permission} group '{group_name}'")
+            return True
+        else:
+            logger.error(f"Failed to remove user from {permission} group: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Failed to remove user '{username}' from {permission} group: {e}")
+        return False
+
+
+def get_study_group_members(study_id, permission):
+    """Get all members of a study group with specific permission"""
+    try:
+        group_name = f"study-{study_id}-{permission}"
+        logger.info(f"Getting members for study group: {group_name}")
+        
+        from auth import get_service_token
+        
+        service_token = get_service_token()
+        if not service_token:
+            logger.error("Failed to get service token")
+            return []
+        
+        headers = {
+            'Authorization': f'Bearer {service_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Get the group
+        groups_response = requests.get(f"{KEYCLOAK_ADMIN_BASE_URI}/groups?search={group_name}", 
+                                     headers=headers, timeout=10)
+        if groups_response.status_code != 200:
+            logger.error(f"Failed to search for group: {groups_response.status_code}")
+            return []
+        
+        groups = groups_response.json()
+        group = None
+        for g in groups:
+            if g['name'] == group_name:
+                group = g
+                break
+        
+        if not group:
+            logger.warning(f"Study group '{group_name}' not found")
+            return []
+        
+        group_id = group['id']
+        
+        # Get group members
+        members_response = requests.get(f"{KEYCLOAK_ADMIN_BASE_URI}/groups/{group_id}/members", 
+                                      headers=headers, timeout=10)
+        
+        if members_response.status_code != 200:
+            logger.error(f"Failed to get group members: {members_response.status_code}")
+            return []
+        
+        members = members_response.json()
+        
+        # Extract relevant user info
+        member_list = []
+        for member in members:
+            member_info = {
+                'id': member.get('id'),
+                'username': member.get('username'),
+                'email': member.get('email'),
+                'firstName': member.get('firstName'),
+                'lastName': member.get('lastName'),
+                'enabled': member.get('enabled', False),
+                'created_at': member.get('createdTimestamp')
+            }
+            member_list.append(member_info)
+        
+        logger.info(f"Found {len(member_list)} members in study group '{group_name}'")
+        return member_list
+        
+    except Exception as e:
+        logger.error(f"Failed to get study group members for {study_id}-{permission}: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return []
+
+
 def setup_study_endpoints(api, studies_ns):
     """Setup study API endpoints"""
     
@@ -716,3 +836,181 @@ def setup_study_endpoints(api, studies_ns):
             except Exception as e:
                 logger.error(f"Error deleting study {study_id}: {e}")
                 return {"error": "Failed to delete study"}, 500
+
+    # Define member management models for studies
+    study_member_input_model = api.model('StudyMemberInput', {
+        'username': fields.String(required=True, description='Username to add/remove'),
+        'permission': fields.String(required=True, description='Permission level: read or write', 
+                                   enum=['read', 'write'])
+    })
+
+    @studies_ns.route('/<string:study_id>/members')
+    @studies_ns.param('study_id', 'The study UUID')
+    class StudyMembers(Resource):
+        @studies_ns.doc('get_study_members', security='Bearer')
+        @studies_ns.response(401, 'Invalid or missing token')
+        @studies_ns.response(404, 'Study not found')
+        @authenticate_token
+        def get(self, study_id):
+            """Get all members in study groups"""
+            try:
+                conn = get_db_connection()
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                
+                # Check if study exists and get study_id (the SONG identifier)
+                cur.execute("SELECT study_id, name FROM studies WHERE id = %s AND deleted_at IS NULL", (study_id,))
+                study = cur.fetchone()
+                
+                if not study:
+                    cur.close()
+                    conn.close()
+                    return {"error": "Study not found"}, 404
+                
+                cur.close()
+                conn.close()
+                
+                # Get group members for this study using the SONG study_id
+                study_identifier = study['study_id']
+                group_members = {
+                    'read': get_study_group_members(study_identifier, 'read'),
+                    'write': get_study_group_members(study_identifier, 'write')
+                }
+                
+                # Calculate totals
+                all_members = set()
+                for members in group_members.values():
+                    all_members.update(member['username'] for member in members)
+                
+                return {
+                    "study_id": study_id,
+                    "study_identifier": study_identifier,
+                    "study_name": study['name'],
+                    "groups": group_members,
+                    "stats": {
+                        "total_unique_members": len(all_members),
+                        "read_members": len(group_members['read']),
+                        "write_members": len(group_members['write'])
+                    }
+                }
+                
+            except Exception as e:
+                logger.error(f"Error retrieving study members {study_id}: {e}")
+                return {"error": "Failed to retrieve study members"}, 500
+
+        @studies_ns.doc('add_study_member', security='Bearer')
+        @studies_ns.expect(study_member_input_model)
+        @studies_ns.response(200, 'Member added successfully')
+        @studies_ns.response(400, 'Invalid input data')
+        @studies_ns.response(401, 'Invalid or missing token')
+        @studies_ns.response(403, 'Insufficient permissions')
+        @studies_ns.response(404, 'Study or user not found')
+        @authenticate_token
+        @require_permissions(["folio.WRITE"])
+        def post(self, study_id):
+            """Add a user to a study group"""
+            try:
+                data = studies_ns.payload
+                
+                if not data or not data.get('username') or not data.get('permission'):
+                    return {"error": "Username and permission are required"}, 400
+                
+                if data['permission'] not in ['read', 'write']:
+                    return {"error": "Permission must be one of: read, write"}, 400
+                
+                conn = get_db_connection()
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                
+                # Check if study exists and get study_id (the SONG identifier)
+                cur.execute("SELECT study_id, name FROM studies WHERE id = %s AND deleted_at IS NULL", (study_id,))
+                study = cur.fetchone()
+                
+                if not study:
+                    cur.close()
+                    conn.close()
+                    return {"error": "Study not found"}, 404
+                
+                cur.close()
+                conn.close()
+                
+                # Add user to study group using the SONG study_id
+                study_identifier = study['study_id']
+                success = add_user_to_study_group_with_permission(
+                    study_identifier, 
+                    data['username'], 
+                    data['permission']
+                )
+                
+                if success:
+                    logger.info(f"Added user '{data['username']}' to {data['permission']} group for study {study_identifier}")
+                    return {
+                        "message": f"Successfully added user '{data['username']}' to {data['permission']} group",
+                        "study_id": study_id,
+                        "study_identifier": study_identifier,
+                        "username": data['username'],
+                        "permission": data['permission']
+                    }
+                else:
+                    return {"error": f"Failed to add user to {data['permission']} group"}, 400
+                
+            except Exception as e:
+                logger.error(f"Error adding study member {study_id}: {e}")
+                return {"error": "Failed to add study member"}, 500
+
+        @studies_ns.doc('remove_study_member', security='Bearer')
+        @studies_ns.expect(study_member_input_model)
+        @studies_ns.response(200, 'Member removed successfully')
+        @studies_ns.response(400, 'Invalid input data')
+        @studies_ns.response(401, 'Invalid or missing token')
+        @studies_ns.response(403, 'Insufficient permissions')
+        @studies_ns.response(404, 'Study or user not found')
+        @authenticate_token
+        @require_permissions(["folio.WRITE"])
+        def delete(self, study_id):
+            """Remove a user from a study group"""
+            try:
+                data = studies_ns.payload
+                
+                if not data or not data.get('username') or not data.get('permission'):
+                    return {"error": "Username and permission are required"}, 400
+                
+                if data['permission'] not in ['read', 'write']:
+                    return {"error": "Permission must be one of: read, write"}, 400
+                
+                conn = get_db_connection()
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                
+                # Check if study exists and get study_id (the SONG identifier)
+                cur.execute("SELECT study_id, name FROM studies WHERE id = %s AND deleted_at IS NULL", (study_id,))
+                study = cur.fetchone()
+                
+                if not study:
+                    cur.close()
+                    conn.close()
+                    return {"error": "Study not found"}, 404
+                
+                cur.close()
+                conn.close()
+                
+                # Remove user from study group using the SONG study_id
+                study_identifier = study['study_id']
+                success = remove_user_from_study_group_with_permission(
+                    study_identifier, 
+                    data['username'], 
+                    data['permission']
+                )
+                
+                if success:
+                    logger.info(f"Removed user '{data['username']}' from {data['permission']} group for study {study_identifier}")
+                    return {
+                        "message": f"Successfully removed user '{data['username']}' from {data['permission']} group",
+                        "study_id": study_id,
+                        "study_identifier": study_identifier,
+                        "username": data['username'],
+                        "permission": data['permission']
+                    }
+                else:
+                    return {"error": f"Failed to remove user from {data['permission']} group"}, 400
+                
+            except Exception as e:
+                logger.error(f"Error removing study member {study_id}: {e}")
+                return {"error": "Failed to remove study member"}, 500
