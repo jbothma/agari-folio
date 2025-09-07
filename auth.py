@@ -345,3 +345,72 @@ def require_permissions(required_scopes):
         
         return decorated_function
     return decorator
+
+
+def get_project_group_members(project_code, permission):
+    """Get all members of a project group with specific permission"""
+    try:
+        group_name = f"project-{project_code}-{permission}"
+        logger.info(f"Getting members for group: {group_name}")
+        
+        service_token = get_service_token()
+        if not service_token:
+            logger.error("Failed to get service token")
+            return []
+        
+        headers = {
+            'Authorization': f'Bearer {service_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Get the group
+        groups_response = requests.get(f"{KEYCLOAK_ADMIN_BASE_URI}/groups?search={group_name}", 
+                                     headers=headers, timeout=10)
+        if groups_response.status_code != 200:
+            logger.error(f"Failed to search for group: {groups_response.status_code}")
+            return []
+        
+        groups = groups_response.json()
+        group = None
+        for g in groups:
+            if g['name'] == group_name:
+                group = g
+                break
+        
+        if not group:
+            logger.warning(f"Group '{group_name}' not found")
+            return []
+        
+        group_id = group['id']
+        
+        # Get group members
+        members_response = requests.get(f"{KEYCLOAK_ADMIN_BASE_URI}/groups/{group_id}/members", 
+                                      headers=headers, timeout=10)
+        
+        if members_response.status_code != 200:
+            logger.error(f"Failed to get group members: {members_response.status_code}")
+            return []
+        
+        members = members_response.json()
+        
+        # Extract relevant user info
+        member_list = []
+        for member in members:
+            member_info = {
+                'id': member.get('id'),
+                'username': member.get('username'),
+                'email': member.get('email'),
+                'firstName': member.get('firstName'),
+                'lastName': member.get('lastName'),
+                'enabled': member.get('enabled', False),
+                'created_at': member.get('createdTimestamp')
+            }
+            member_list.append(member_info)
+        
+        logger.info(f"Found {len(member_list)} members in group '{group_name}'")
+        return member_list
+        
+    except Exception as e:
+        logger.error(f"Failed to get group members for {project_code}-{permission}: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return []

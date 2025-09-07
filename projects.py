@@ -758,3 +758,294 @@ def setup_project_endpoints(api, projects_ns):
             except Exception as e:
                 logger.error(f"Error deleting project {project_id}: {e}")
                 return {"error": "Failed to delete project"}, 500
+
+    @projects_ns.route('/<string:project_id>/studies')
+    @projects_ns.param('project_id', 'The project UUID')
+    class ProjectStudies(Resource):
+        @projects_ns.doc('get_project_studies', security='Bearer')
+        @projects_ns.response(401, 'Invalid or missing token')
+        @projects_ns.response(404, 'Project not found')
+        @authenticate_token
+        def get(self, project_id):
+            """Get all studies in a project"""
+            try:
+                conn = get_db_connection()
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                
+                # Check if project exists
+                cur.execute("SELECT name, slug FROM projects WHERE id = %s AND deleted_at IS NULL", (project_id,))
+                project = cur.fetchone()
+                
+                if not project:
+                    cur.close()
+                    conn.close()
+                    return {"error": "Project not found"}, 404
+                
+                # Get all studies in this project
+                cur.execute("""
+                    SELECT s.id, s.study_id, s.name, s.description, s.created_at, s.updated_at
+                    FROM studies s
+                    WHERE s.project_id = %s AND s.deleted_at IS NULL
+                    ORDER BY s.created_at DESC
+                """, (project_id,))
+                
+                studies = cur.fetchall()
+                cur.close()
+                conn.close()
+                
+                # Convert to JSON-serializable format
+                study_list = [serialize_record(study) for study in studies]
+                
+                logger.info(f"Retrieved {len(study_list)} studies for project {project_id}")
+                return {
+                    "project_id": project_id,
+                    "project_name": project['name'],
+                    "project_slug": project['slug'],
+                    "studies": study_list,
+                    "total": len(study_list)
+                }
+                
+            except Exception as e:
+                logger.error(f"Error retrieving studies for project {project_id}: {e}")
+                return {"error": "Failed to retrieve project studies"}, 500
+
+    @projects_ns.route('/<string:project_id>/summary')
+    @projects_ns.param('project_id', 'The project UUID')
+    class ProjectSummary(Resource):
+        @projects_ns.doc('get_project_summary', security='Bearer')
+        @projects_ns.response(401, 'Invalid or missing token')
+        @projects_ns.response(404, 'Project not found')
+        @authenticate_token
+        def get(self, project_id):
+            """Get complete project summary including studies and group members"""
+            try:
+                conn = get_db_connection()
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                
+                # Get project details with pathogen info
+                cur.execute("""
+                    SELECT p.id, p.slug, p.name, p.description, p.pathogen_id, p.created_at, p.updated_at,
+                           path.name as pathogen_name
+                    FROM projects p
+                    LEFT JOIN pathogens path ON p.pathogen_id = path.id AND path.deleted_at IS NULL
+                    WHERE p.id = %s AND p.deleted_at IS NULL
+                """, (project_id,))
+                
+                project = cur.fetchone()
+                
+                if not project:
+                    cur.close()
+                    conn.close()
+                    return {"error": "Project not found"}, 404
+                
+                # Get all studies in this project
+                cur.execute("""
+                    SELECT s.id, s.study_id, s.name, s.description, s.created_at, s.updated_at
+                    FROM studies s
+                    WHERE s.project_id = %s AND s.deleted_at IS NULL
+                    ORDER BY s.created_at DESC
+                """, (project_id,))
+                
+                studies = cur.fetchall()
+                cur.close()
+                conn.close()
+                
+                # Get group members for this project
+                from auth import get_project_group_members
+                group_members = {
+                    'read': get_project_group_members(project['slug'], 'read'),
+                    'write': get_project_group_members(project['slug'], 'write'),
+                    'admin': get_project_group_members(project['slug'], 'admin')
+                }
+                
+                # Build response
+                result = serialize_record(project)
+                result['studies'] = [serialize_record(study) for study in studies]
+                result['group_members'] = group_members
+                result['stats'] = {
+                    'total_studies': len(studies),
+                    'total_members': sum(len(members) for members in group_members.values())
+                }
+                
+                logger.info(f"Retrieved complete summary for project {project_id}")
+                return result
+                
+            except Exception as e:
+                logger.error(f"Error retrieving project summary {project_id}: {e}")
+                return {"error": "Failed to retrieve project summary"}, 500
+
+    # Define member management models
+    member_input_model = api.model('ProjectMemberInput', {
+        'username': fields.String(required=True, description='Username to add/remove'),
+        'permission': fields.String(required=True, description='Permission level: read, write, or admin', 
+                                   enum=['read', 'write', 'admin'])
+    })
+
+    @projects_ns.route('/<string:project_id>/members')
+    @projects_ns.param('project_id', 'The project UUID')
+    class ProjectMembers(Resource):
+        @projects_ns.doc('get_project_members', security='Bearer')
+        @projects_ns.response(401, 'Invalid or missing token')
+        @projects_ns.response(404, 'Project not found')
+        @authenticate_token
+        def get(self, project_id):
+            """Get all members in project groups"""
+            try:
+                conn = get_db_connection()
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                
+                # Check if project exists
+                cur.execute("SELECT name, slug FROM projects WHERE id = %s AND deleted_at IS NULL", (project_id,))
+                project = cur.fetchone()
+                
+                if not project:
+                    cur.close()
+                    conn.close()
+                    return {"error": "Project not found"}, 404
+                
+                cur.close()
+                conn.close()
+                
+                # Get group members for this project
+                from auth import get_project_group_members
+                group_members = {
+                    'read': get_project_group_members(project['slug'], 'read'),
+                    'write': get_project_group_members(project['slug'], 'write'),
+                    'admin': get_project_group_members(project['slug'], 'admin')
+                }
+                
+                # Calculate totals
+                all_members = set()
+                for members in group_members.values():
+                    all_members.update(member['username'] for member in members)
+                
+                return {
+                    "project_id": project_id,
+                    "project_name": project['name'],
+                    "project_slug": project['slug'],
+                    "groups": group_members,
+                    "stats": {
+                        "total_unique_members": len(all_members),
+                        "read_members": len(group_members['read']),
+                        "write_members": len(group_members['write']),
+                        "admin_members": len(group_members['admin'])
+                    }
+                }
+                
+            except Exception as e:
+                logger.error(f"Error retrieving project members {project_id}: {e}")
+                return {"error": "Failed to retrieve project members"}, 500
+
+        @projects_ns.doc('add_project_member', security='Bearer')
+        @projects_ns.expect(member_input_model)
+        @projects_ns.response(200, 'Member added successfully')
+        @projects_ns.response(400, 'Invalid input data')
+        @projects_ns.response(401, 'Invalid or missing token')
+        @projects_ns.response(403, 'Insufficient permissions')
+        @projects_ns.response(404, 'Project or user not found')
+        @authenticate_token
+        @require_permissions(["folio.WRITE"])
+        def post(self, project_id):
+            """Add a user to a project group"""
+            try:
+                data = projects_ns.payload
+                
+                if not data or not data.get('username') or not data.get('permission'):
+                    return {"error": "Username and permission are required"}, 400
+                
+                if data['permission'] not in ['read', 'write', 'admin']:
+                    return {"error": "Permission must be one of: read, write, admin"}, 400
+                
+                conn = get_db_connection()
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                
+                # Check if project exists
+                cur.execute("SELECT name, slug FROM projects WHERE id = %s AND deleted_at IS NULL", (project_id,))
+                project = cur.fetchone()
+                
+                if not project:
+                    cur.close()
+                    conn.close()
+                    return {"error": "Project not found"}, 404
+                
+                cur.close()
+                conn.close()
+                
+                # Add user to project group
+                success = add_user_to_project_group_with_permission(
+                    project['slug'], 
+                    data['username'], 
+                    data['permission']
+                )
+                
+                if success:
+                    logger.info(f"Added user '{data['username']}' to {data['permission']} group for project {project_id}")
+                    return {
+                        "message": f"Successfully added user '{data['username']}' to {data['permission']} group",
+                        "project_id": project_id,
+                        "username": data['username'],
+                        "permission": data['permission']
+                    }
+                else:
+                    return {"error": f"Failed to add user to {data['permission']} group"}, 400
+                
+            except Exception as e:
+                logger.error(f"Error adding project member {project_id}: {e}")
+                return {"error": "Failed to add project member"}, 500
+
+        @projects_ns.doc('remove_project_member', security='Bearer')
+        @projects_ns.expect(member_input_model)
+        @projects_ns.response(200, 'Member removed successfully')
+        @projects_ns.response(400, 'Invalid input data')
+        @projects_ns.response(401, 'Invalid or missing token')
+        @projects_ns.response(403, 'Insufficient permissions')
+        @projects_ns.response(404, 'Project or user not found')
+        @authenticate_token
+        @require_permissions(["folio.WRITE"])
+        def delete(self, project_id):
+            """Remove a user from a project group"""
+            try:
+                data = projects_ns.payload
+                
+                if not data or not data.get('username') or not data.get('permission'):
+                    return {"error": "Username and permission are required"}, 400
+                
+                if data['permission'] not in ['read', 'write', 'admin']:
+                    return {"error": "Permission must be one of: read, write, admin"}, 400
+                
+                conn = get_db_connection()
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                
+                # Check if project exists
+                cur.execute("SELECT name, slug FROM projects WHERE id = %s AND deleted_at IS NULL", (project_id,))
+                project = cur.fetchone()
+                
+                if not project:
+                    cur.close()
+                    conn.close()
+                    return {"error": "Project not found"}, 404
+                
+                cur.close()
+                conn.close()
+                
+                # Remove user from project group
+                success = remove_user_from_project_group_with_permission(
+                    project['slug'], 
+                    data['username'], 
+                    data['permission']
+                )
+                
+                if success:
+                    logger.info(f"Removed user '{data['username']}' from {data['permission']} group for project {project_id}")
+                    return {
+                        "message": f"Successfully removed user '{data['username']}' from {data['permission']} group",
+                        "project_id": project_id,
+                        "username": data['username'],
+                        "permission": data['permission']
+                    }
+                else:
+                    return {"error": f"Failed to remove user from {data['permission']} group"}, 400
+                
+            except Exception as e:
+                logger.error(f"Error removing project member {project_id}: {e}")
+                return {"error": "Failed to remove project member"}, 500
