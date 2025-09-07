@@ -1,20 +1,222 @@
 """
 Study Management Module for Folio API
 
-This module contains all study-related endpoints.
+This module contains all study-related endpoints and SONG integration.
 """
 
 import logging
+import requests
+import traceback
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import uuid
 from datetime import datetime
 from flask_restx import Resource, fields
 from flask import jsonify, g
-from auth import authenticate_token, require_permissions
+from auth import (
+    authenticate_token, require_permissions, get_service_token,
+    KEYCLOAK_ADMIN_BASE_URI, KEYCLOAK_UMA_RESOURCE_URI
+)
 from utils import serialize_record, get_db_connection
 
 logger = logging.getLogger(__name__)
+
+# SONG service configuration
+SONG_BASE_URI = "http://song.agari.svc.cluster.local:8080"
+
+
+def create_study_in_song(study_id, name, description, access_token):
+    """Create a study in SONG service"""
+    try:
+        logger.info(f"=== CREATING STUDY IN SONG: {study_id} ===")
+        
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        study_data = {
+            'studyId': study_id,
+            'name': name,
+            'description': description or f"Study {study_id}",
+            'organization': 'AGARI',
+            'info': {
+                'projectType': 'genomics',
+                'region': 'South Africa',
+                'createdBy': 'folio-service'
+            }
+        }
+        
+        response = requests.post(f"{SONG_BASE_URI}/studies/{study_id}/", 
+                               headers=headers, json=study_data, timeout=30)
+        
+        if response.status_code == 201:
+            song_study = response.json()
+            logger.info(f"Successfully created study '{study_id}' in SONG")
+            return song_study
+        elif response.status_code == 409:
+            logger.warning(f"Study '{study_id}' already exists in SONG")
+            return None
+        else:
+            logger.error(f"Failed to create study in SONG: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Failed to create study in SONG: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return False
+
+
+def create_study_resource(study_id):
+    """Create a Keycloak resource for a study using UMA Resource Registration API"""
+    try:
+        logger.info(f"=== CREATING UMA RESOURCE FOR STUDY: {study_id} ===")
+        
+        service_token = get_service_token()
+        if not service_token:
+            logger.error("Failed to get service token")
+            return False
+        
+        headers = {
+            'Authorization': f'Bearer {service_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Create the resource using UMA Resource Registration API
+        resource_data = {
+            'name': study_id,
+            'displayName': f"Study: {study_id}",
+            'type': 'urn:folio:resources:study',
+            'scopes': ['READ', 'WRITE'],
+            'attributes': {
+                'study_id': [study_id],
+                'created_by': ['folio-service']
+            }
+        }
+        
+        # Use UMA Resource Registration endpoint
+        response = requests.post(KEYCLOAK_UMA_RESOURCE_URI, headers=headers, json=resource_data, timeout=10)
+        
+        if response.status_code == 201:
+            resource = response.json()
+            logger.info(f"Successfully created UMA resource '{study_id}' with ID: {resource.get('_id')}")
+            return resource
+        elif response.status_code == 409:
+            logger.warning(f"UMA Resource '{study_id}' already exists")
+            return None
+        else:
+            logger.error(f"Failed to create UMA resource: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Failed to create study resource: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return False
+
+
+def create_study_group_with_permission(study_id, permission):
+    """Create a Keycloak group for a study with specific permission (read, write, or admin)"""
+    try:
+        group_name = f"study-{study_id}-{permission}"
+        logger.info(f"=== CREATING {permission.upper()} GROUP FOR STUDY: {study_id} ===")
+        
+        service_token = get_service_token()
+        if not service_token:
+            logger.error("Failed to get service token")
+            return False
+        
+        headers = {
+            'Authorization': f'Bearer {service_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Create the group data
+        group_data = {
+            'name': group_name,
+            'path': f"/{group_name}",
+            'attributes': {
+                'study_id': [study_id],
+                'permission': [permission],
+                'created_by': ['folio-service'],
+                'group_type': ['study'],
+                'description': [f"Study {permission} group for {study_id}"]
+            }
+        }
+        
+        # Create the group using Keycloak Admin API
+        response = requests.post(f"{KEYCLOAK_ADMIN_BASE_URI}/groups", 
+                               headers=headers, json=group_data, timeout=10)
+        
+        if response.status_code == 201:
+            # Get the created group ID from Location header
+            location = response.headers.get('Location')
+            group_id = location.split('/')[-1] if location else None
+            logger.info(f"Successfully created {permission} group '{group_name}' with ID: {group_id}")
+            return True
+        elif response.status_code == 409:
+            logger.warning(f"{permission.capitalize()} group for study '{study_id}' already exists")
+            return True
+        else:
+            logger.error(f"Failed to create {permission} group: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Failed to create {permission} group for study {study_id}: {e}")
+        return False
+
+
+def add_user_to_study_group_with_permission(study_id, username, permission):
+    """Add a user to a study group with specific permission (read or write)"""
+    try:
+        group_name = f"study-{study_id}-{permission}"
+        logger.info(f"=== ADDING USER '{username}' TO {permission.upper()} GROUP '{group_name}' ===")
+        
+        # Import auth functions we need
+        from auth import get_project_group_by_name, get_user_by_username
+        
+        # Get the specific permission group (reuse the project function since it's generic)
+        group = get_project_group_by_name(group_name)
+        if not group:
+            logger.error(f"Study {permission} group '{group_name}' not found")
+            return False
+        
+        # Get the user
+        user = get_user_by_username(username)
+        if not user:
+            logger.error(f"User '{username}' not found")
+            return False
+        
+        service_token = get_service_token()
+        if not service_token:
+            return False
+        
+        headers = {
+            'Authorization': f'Bearer {service_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        group_id = group['id']
+        user_id = user['id']
+        
+        # Add user to group
+        response = requests.put(f"{KEYCLOAK_ADMIN_BASE_URI}/users/{user_id}/groups/{group_id}", 
+                              headers=headers, timeout=10)
+        
+        if response.status_code == 204:
+            logger.info(f"Successfully added user '{username}' to {permission} group '{group_name}'")
+            return True
+        else:
+            logger.error(f"Failed to add user to {permission} group: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Failed to add user '{username}' to {permission} group: {e}")
+        return False
+
+
+def add_creator_to_study_write_group(study_id, username):
+    """Add the study creator to the write group - convenience function for study creation"""
+    return add_user_to_study_group_with_permission(study_id, username, 'write')
 
 
 def setup_study_endpoints(api, studies_ns):
@@ -35,6 +237,7 @@ def setup_study_endpoints(api, studies_ns):
     })
 
     study_input_model = api.model('StudyInput', {
+        'study_id': fields.String(required=True, description='Study ID (unique identifier for SONG)'),
         'name': fields.String(required=True, description='Study name'),
         'description': fields.String(description='Study description'),
         'project_id': fields.String(required=True, description='Associated project UUID')
@@ -85,6 +288,7 @@ def setup_study_endpoints(api, studies_ns):
         @studies_ns.response(400, 'Invalid input data')
         @studies_ns.response(401, 'Invalid or missing token')
         @studies_ns.response(403, 'Insufficient permissions')
+        @authenticate_token
         @require_permissions(["folio.WRITE"])
         def post(self):
             """Create a new study (requires folio.WRITE permission)"""
@@ -92,8 +296,8 @@ def setup_study_endpoints(api, studies_ns):
                 data = studies_ns.payload
                 
                 # Validate required fields
-                if not data or not data.get('name') or not data.get('project_id'):
-                    return {"error": "Study name and project_id are required"}, 400
+                if not data or not data.get('name') or not data.get('project_id') or not data.get('study_id'):
+                    return {"error": "Study name, study_id and project_id are required"}, 400
                 
                 # Generate UUID for study
                 study_id = str(uuid.uuid4())
@@ -117,11 +321,12 @@ def setup_study_endpoints(api, studies_ns):
                 
                 # Insert new study
                 cur.execute("""
-                    INSERT INTO studies (id, name, description, project_id, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, NOW(), NOW())
-                    RETURNING id, name, description, project_id, created_at, updated_at
+                    INSERT INTO studies (id, study_id, name, description, project_id, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
+                    RETURNING id, study_id, name, description, project_id, created_at, updated_at
                 """, (
                     study_id,
+                    data['study_id'],
                     data['name'],
                     data.get('description'),
                     data['project_id']
@@ -138,6 +343,41 @@ def setup_study_endpoints(api, studies_ns):
                 result['project_name'] = project['name']
                 result['pathogen_id'] = project['pathogen_id']
                 result['pathogen_name'] = project['pathogen_name']
+                
+                # Create study in SONG and Keycloak resources (optional - log if fails)
+                try:
+                    # Create study in SONG using user's token
+                    user_token = g.token  # User's JWT token from auth
+                    song_result = create_study_in_song(data['study_id'], data['name'], 
+                                                     data.get('description'), user_token)
+                    if song_result:
+                        logger.info(f"Successfully created study '{data['study_id']}' in SONG")
+                    elif song_result is None:
+                        logger.info(f"Study '{data['study_id']}' already exists in SONG")
+                    else:
+                        logger.warning(f"Failed to create study '{data['study_id']}' in SONG")
+                    
+                    # Create Keycloak resource for study
+                    create_study_resource(data['study_id'])
+                    logger.info(f"Ensured Keycloak resource exists for study: {data['study_id']}")
+                    
+                    # Create permission groups (will handle existing groups gracefully)
+                    for permission in ['read', 'write']:
+                        create_study_group_with_permission(data['study_id'], permission)
+                    
+                    # Add the creating user to both read and write groups for this study
+                    if add_user_to_study_group_with_permission(data['study_id'], g.user['username'], 'read'):
+                        logger.info(f"Added user '{g.user['username']}' to read group for study: {data['study_id']}")
+                    else:
+                        logger.warning(f"Failed to add user '{g.user['username']}' to read group for study: {data['study_id']}")
+                        
+                    if add_user_to_study_group_with_permission(data['study_id'], g.user['username'], 'write'):
+                        logger.info(f"Added user '{g.user['username']}' to write group for study: {data['study_id']}")
+                    else:
+                        logger.warning(f"Failed to add user '{g.user['username']}' to write group for study: {data['study_id']}")
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to create SONG/Keycloak resources for study {data['study_id']}: {e}")
                 
                 logger.info(f"Created study '{data['name']}' by user: {g.user['username']}")
                 return result, 201
@@ -190,6 +430,7 @@ def setup_study_endpoints(api, studies_ns):
         @studies_ns.response(401, 'Invalid or missing token')
         @studies_ns.response(403, 'Insufficient permissions')
         @studies_ns.response(404, 'Study not found')
+        @authenticate_token
         @require_permissions(["folio.WRITE"])
         def put(self, study_id):
             """Update a study (requires folio.WRITE permission)"""
@@ -287,6 +528,7 @@ def setup_study_endpoints(api, studies_ns):
         @studies_ns.response(401, 'Invalid or missing token')
         @studies_ns.response(403, 'Insufficient permissions')
         @studies_ns.response(404, 'Study not found')
+        @authenticate_token
         @require_permissions(["folio.WRITE"])
         def delete(self, study_id):
             """Soft delete a study (requires folio.WRITE permission)"""

@@ -230,6 +230,7 @@ def setup_pathogen_endpoints(api, pathogens_ns):
         @pathogens_ns.response(401, 'Invalid or missing token')
         @pathogens_ns.response(403, 'Insufficient permissions')
         @pathogens_ns.response(409, 'Pathogen name already exists')
+        @authenticate_token
         @require_permissions(["folio.WRITE"])
         def post(self):
             """Create a new pathogen (requires folio.WRITE permission)"""
@@ -328,6 +329,7 @@ def setup_pathogen_endpoints(api, pathogens_ns):
         @pathogens_ns.response(403, 'Insufficient permissions')
         @pathogens_ns.response(404, 'Pathogen not found')
         @pathogens_ns.response(409, 'Pathogen name already exists')
+        @authenticate_token
         @require_permissions(["folio.WRITE"])
         def put(self, pathogen_id):
             """Update a pathogen (requires folio.WRITE permission)"""
@@ -402,6 +404,7 @@ def setup_pathogen_endpoints(api, pathogens_ns):
         @pathogens_ns.response(403, 'Insufficient permissions')
         @pathogens_ns.response(404, 'Pathogen not found')
         @pathogens_ns.response(409, 'Cannot delete pathogen with associated projects')
+        @authenticate_token
         @require_permissions(["folio.WRITE"])
         def delete(self, pathogen_id):
             """Soft delete a pathogen (requires folio.WRITE permission)"""

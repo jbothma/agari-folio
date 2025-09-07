@@ -169,6 +169,94 @@ def add_user_to_project_group_with_permission(project_code, username, permission
         return False
 
 
+def add_creator_to_project_admin_group(project_code, username):
+    """Add the project creator to the admin group - convenience function for project creation"""
+    return add_user_to_project_group_with_permission(project_code, username, 'admin')
+
+
+def remove_user_from_project_group_with_permission(project_code, username, permission):
+    """Remove a user from a project group with specific permission (read, write, or admin)"""
+    try:
+        group_name = f"project-{project_code}-{permission}"
+        logger.info(f"=== REMOVING USER '{username}' FROM {permission.upper()} GROUP '{group_name}' ===")
+        
+        # Get the specific permission group
+        group = get_project_group_by_name(group_name)
+        if not group:
+            logger.error(f"Project {permission} group '{group_name}' not found")
+            return False
+        
+        # Get the user
+        user = get_user_by_username(username)
+        if not user:
+            logger.error(f"User '{username}' not found")
+            return False
+        
+        service_token = get_service_token()
+        if not service_token:
+            return False
+        
+        headers = {
+            'Authorization': f'Bearer {service_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        group_id = group['id']
+        user_id = user['id']
+        
+        # Remove user from group
+        response = requests.delete(f"{KEYCLOAK_ADMIN_BASE_URI}/users/{user_id}/groups/{group_id}", 
+                                 headers=headers, timeout=10)
+        
+        if response.status_code == 204:
+            logger.info(f"Successfully removed user '{username}' from {permission} group '{group_name}'")
+            return True
+        else:
+            logger.error(f"Failed to remove user from {permission} group: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Failed to remove user '{username}' from {permission} group: {e}")
+        return False
+
+
+def manage_project_user_permissions(project_code, username, permissions_to_add=None, permissions_to_remove=None):
+    """
+    Manage user permissions for a project by adding/removing from multiple groups
+    
+    Args:
+        project_code: The project slug/code
+        username: Username to manage permissions for
+        permissions_to_add: List of permissions to add (e.g., ['read', 'write'])
+        permissions_to_remove: List of permissions to remove (e.g., ['admin'])
+    
+    Returns:
+        dict: Status of operations
+    """
+    results = {
+        'added': [],
+        'removed': [],
+        'failed_add': [],
+        'failed_remove': []
+    }
+    
+    if permissions_to_add:
+        for permission in permissions_to_add:
+            if add_user_to_project_group_with_permission(project_code, username, permission):
+                results['added'].append(permission)
+            else:
+                results['failed_add'].append(permission)
+    
+    if permissions_to_remove:
+        for permission in permissions_to_remove:
+            if remove_user_from_project_group_with_permission(project_code, username, permission):
+                results['removed'].append(permission)
+            else:
+                results['failed_remove'].append(permission)
+    
+    return results
+
+
 def setup_project_endpoints(api, projects_ns):
     """Setup project API endpoints"""
     
@@ -235,6 +323,7 @@ def setup_project_endpoints(api, projects_ns):
         @projects_ns.response(401, 'Invalid or missing token')
         @projects_ns.response(403, 'Insufficient permissions')
         @projects_ns.response(409, 'Project code already exists')
+        @authenticate_token
         @require_permissions(["folio.WRITE"])
         def post(self):
             """Create a new project (requires folio.WRITE permission)"""
@@ -301,13 +390,20 @@ def setup_project_endpoints(api, projects_ns):
                 
                 # Create Keycloak resource and groups for project (optional - log if fails)
                 try:
-                    resource = create_project_resource(data['slug'])
-                    if resource:
-                        logger.info(f"Created Keycloak resource for project: {data['slug']}")
-                        
-                        # Create permission groups
-                        for permission in ['read', 'write', 'admin']:
-                            create_project_group_with_permission(data['slug'], permission)
+                    # Always try to create/ensure groups exist, regardless of resource status
+                    create_project_resource(data['slug'])
+                    logger.info(f"Ensured Keycloak resource exists for project: {data['slug']}")
+                    
+                    # Create permission groups (will handle existing groups gracefully)
+                    for permission in ['read', 'write', 'admin']:
+                        create_project_group_with_permission(data['slug'], permission)
+                    
+                    # Add the creating user to the admin group for this project
+                    if add_creator_to_project_admin_group(data['slug'], g.user['username']):
+                        logger.info(f"Added user '{g.user['username']}' to admin group for project: {data['slug']}")
+                    else:
+                        logger.warning(f"Failed to add user '{g.user['username']}' to admin group for project: {data['slug']}")
+                    
                 except Exception as e:
                     logger.warning(f"Failed to create Keycloak resources for project {data['slug']}: {e}")
                 
@@ -361,6 +457,7 @@ def setup_project_endpoints(api, projects_ns):
         @projects_ns.response(403, 'Insufficient permissions')
         @projects_ns.response(404, 'Project not found')
         @projects_ns.response(409, 'Project code already exists')
+        @authenticate_token
         @require_permissions(["folio.WRITE"])
         def put(self, project_id):
             """Update a project (requires folio.WRITE permission)"""
@@ -460,6 +557,7 @@ def setup_project_endpoints(api, projects_ns):
         @projects_ns.response(403, 'Insufficient permissions')
         @projects_ns.response(404, 'Project not found')
         @projects_ns.response(409, 'Cannot delete project with associated studies')
+        @authenticate_token
         @require_permissions(["folio.WRITE"])
         def delete(self, project_id):
             """Soft delete a project (requires folio.WRITE permission)"""
