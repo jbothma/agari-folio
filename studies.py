@@ -14,7 +14,7 @@ from datetime import datetime
 from flask_restx import Resource, fields
 from flask import jsonify, g
 from auth import (
-    authenticate_token, require_permissions, get_service_token,
+    authenticate_token, require_permissions, require_study_access, get_service_token,
     KEYCLOAK_ADMIN_BASE_URI, KEYCLOAK_UMA_RESOURCE_URI
 )
 from utils import serialize_record, get_db_connection
@@ -666,10 +666,12 @@ def setup_study_endpoints(api, studies_ns):
         @studies_ns.doc('get_study', security='Bearer')
         @studies_ns.marshal_with(study_model)
         @studies_ns.response(401, 'Invalid or missing token')
+        @studies_ns.response(403, 'Access denied to private study')
         @studies_ns.response(404, 'Study not found')
         @authenticate_token
+        @require_study_access()
         def get(self, study_id):
-            """Get study details by ID"""
+            """Get study details by ID (requires study access)"""
             try:
                 conn = get_db_connection()
                 cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -849,10 +851,12 @@ def setup_study_endpoints(api, studies_ns):
     class StudyMembers(Resource):
         @studies_ns.doc('get_study_members', security='Bearer')
         @studies_ns.response(401, 'Invalid or missing token')
+        @studies_ns.response(403, 'Access denied to private study')
         @studies_ns.response(404, 'Study not found')
         @authenticate_token
+        @require_study_access()
         def get(self, study_id):
-            """Get all members in study groups"""
+            """Get all members in study groups (requires study access)"""
             try:
                 conn = get_db_connection()
                 cur = conn.cursor(cursor_factory=RealDictCursor)

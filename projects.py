@@ -15,7 +15,7 @@ from datetime import datetime
 from flask_restx import Resource, fields
 from flask import jsonify, g
 from auth import (
-    get_service_token, authenticate_token, require_permissions,
+    get_service_token, authenticate_token, require_permissions, require_project_access,
     KEYCLOAK_ADMIN_BASE_URI, KEYCLOAK_UMA_RESOURCE_URI, get_project_group_by_name,
     get_user_by_username
 )
@@ -399,6 +399,7 @@ def setup_project_endpoints(api, projects_ns):
         'description': fields.String(description='Project description'),
         'pathogen_id': fields.String(description='Associated pathogen UUID'),
         'pathogen_name': fields.String(description='Associated pathogen name (read-only)', readonly=True),
+        'privacy': fields.String(description='Project privacy setting (public/private)', enum=['public', 'private']),
         'created_at': fields.DateTime(description='Creation timestamp (auto-generated)', readonly=True),
         'updated_at': fields.DateTime(description='Last update timestamp (auto-generated)', readonly=True)
     })
@@ -407,7 +408,8 @@ def setup_project_endpoints(api, projects_ns):
         'slug': fields.String(required=True, description='Project slug (must be unique)'),
         'name': fields.String(required=True, description='Project name'),
         'description': fields.String(description='Project description'),
-        'pathogen_id': fields.String(description='Associated pathogen UUID')
+        'pathogen_id': fields.String(description='Associated pathogen UUID'),
+        'privacy': fields.String(description='Project privacy setting (defaults to private)', enum=['public', 'private'])
     })
 
     @projects_ns.route('')
@@ -417,14 +419,14 @@ def setup_project_endpoints(api, projects_ns):
         @projects_ns.response(401, 'Invalid or missing token')
         @authenticate_token
         def get(self):
-            """Get all projects (public access with valid token)"""
+            """Get all projects (public projects + private projects user has access to)"""
             try:
                 conn = get_db_connection()
                 cur = conn.cursor(cursor_factory=RealDictCursor)
                 
-                # Get all active projects with pathogen names
+                # Get all active projects with pathogen names and privacy
                 cur.execute("""
-                    SELECT p.id, p.slug, p.name, p.description, p.pathogen_id, p.created_at, p.updated_at,
+                    SELECT p.id, p.slug, p.name, p.description, p.pathogen_id, p.privacy, p.created_at, p.updated_at,
                            path.name as pathogen_name
                     FROM projects p
                     LEFT JOIN pathogens path ON p.pathogen_id = path.id AND path.deleted_at IS NULL
@@ -432,16 +434,49 @@ def setup_project_endpoints(api, projects_ns):
                     ORDER BY p.created_at DESC
                 """)
                 
-                projects = cur.fetchall()
-                
-                # Convert to JSON-serializable format
-                project_list = [serialize_record(project) for project in projects]
-                
+                all_projects = cur.fetchall()
                 cur.close()
                 conn.close()
                 
-                logger.info(f"Retrieved {len(project_list)} projects for user: {g.user['username']}")
-                return project_list
+                # Filter projects based on privacy and user access
+                accessible_projects = []
+                username = g.user.get('preferred_username')
+                
+                for project in all_projects:
+                    project_dict = serialize_record(project)
+                    
+                    # Always include public projects
+                    if project['privacy'] == 'public':
+                        accessible_projects.append(project_dict)
+                        continue
+                    
+                    # For private projects, check if user has access
+                    if project['privacy'] == 'private' and username:
+                        has_access = False
+                        
+                        # Check if user is member of any project group (read, write, or admin)
+                        for permission in ['read', 'write', 'admin']:
+                            try:
+                                group_name = f"project-{project['slug']}-{permission}"
+                                group = get_project_group_by_name(group_name)
+                                
+                                if group:
+                                    from auth import get_project_group_members
+                                    members = get_project_group_members(project['slug'], permission)
+                                    user_in_group = any(member['username'] == username for member in members)
+                                    
+                                    if user_in_group:
+                                        has_access = True
+                                        break
+                            except Exception as e:
+                                logger.warning(f"Error checking group membership for {group_name}: {e}")
+                                continue
+                        
+                        if has_access:
+                            accessible_projects.append(project_dict)
+                
+                logger.info(f"Retrieved {len(accessible_projects)} accessible projects for user: {username}")
+                return accessible_projects
                 
             except Exception as e:
                 logger.error(f"Error retrieving projects: {e}")
@@ -495,11 +530,17 @@ def setup_project_endpoints(api, projects_ns):
                     
                     pathogen_name = pathogen['name']
                 
-                # Insert new project
+                # Insert new project (with privacy support)
+                privacy = data.get('privacy', 'private')  # Default to private for security
+                if privacy not in ['public', 'private']:
+                    cur.close()
+                    conn.close()
+                    return {"error": "Privacy must be 'public' or 'private'"}, 400
+                
                 cur.execute("""
-                    INSERT INTO projects (id, slug, name, description, pathogen_id, organization_id, user_id, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-                    RETURNING id, slug, name, description, pathogen_id, created_at, updated_at
+                    INSERT INTO projects (id, slug, name, description, pathogen_id, organization_id, user_id, privacy, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                    RETURNING id, slug, name, description, pathogen_id, privacy, created_at, updated_at
                 """, (
                     project_id,
                     data['slug'],
@@ -507,7 +548,8 @@ def setup_project_endpoints(api, projects_ns):
                     data.get('description'),
                     data.get('pathogen_id'),
                     'default-org',  # TODO: Get from user context
-                    g.user.get('sub', 'unknown')  # User ID from token
+                    g.user.get('sub', 'unknown'),  # User ID from token
+                    privacy
                 ))
                 
                 new_project = cur.fetchone()
@@ -575,16 +617,18 @@ def setup_project_endpoints(api, projects_ns):
         @projects_ns.doc('get_project', security='Bearer')
         @projects_ns.marshal_with(project_model)
         @projects_ns.response(401, 'Invalid or missing token')
+        @projects_ns.response(403, 'Access denied to private project')
         @projects_ns.response(404, 'Project not found')
         @authenticate_token
+        @require_project_access()
         def get(self, project_id):
-            """Get project details by ID"""
+            """Get project details by ID (requires access to private projects)"""
             try:
                 conn = get_db_connection()
                 cur = conn.cursor(cursor_factory=RealDictCursor)
                 
                 cur.execute("""
-                    SELECT p.id, p.slug, p.name, p.description, p.pathogen_id, p.created_at, p.updated_at,
+                    SELECT p.id, p.slug, p.name, p.description, p.pathogen_id, p.privacy, p.created_at, p.updated_at,
                            path.name as pathogen_name
                     FROM projects p
                     LEFT JOIN pathogens path ON p.pathogen_id = path.id AND path.deleted_at IS NULL
@@ -764,10 +808,12 @@ def setup_project_endpoints(api, projects_ns):
     class ProjectStudies(Resource):
         @projects_ns.doc('get_project_studies', security='Bearer')
         @projects_ns.response(401, 'Invalid or missing token')
+        @projects_ns.response(403, 'Access denied to private project')
         @projects_ns.response(404, 'Project not found')
         @authenticate_token
+        @require_project_access()
         def get(self, project_id):
-            """Get all studies in a project"""
+            """Get all studies in a project (requires project access)"""
             try:
                 conn = get_db_connection()
                 cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -814,10 +860,12 @@ def setup_project_endpoints(api, projects_ns):
     class ProjectSummary(Resource):
         @projects_ns.doc('get_project_summary', security='Bearer')
         @projects_ns.response(401, 'Invalid or missing token')
+        @projects_ns.response(403, 'Access denied to private project')
         @projects_ns.response(404, 'Project not found')
         @authenticate_token
+        @require_project_access()
         def get(self, project_id):
-            """Get complete project summary including studies and group members"""
+            """Get complete project summary including studies and group members (requires project access)"""
             try:
                 conn = get_db_connection()
                 cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -886,10 +934,12 @@ def setup_project_endpoints(api, projects_ns):
     class ProjectMembers(Resource):
         @projects_ns.doc('get_project_members', security='Bearer')
         @projects_ns.response(401, 'Invalid or missing token')
+        @projects_ns.response(403, 'Access denied to private project')
         @projects_ns.response(404, 'Project not found')
         @authenticate_token
+        @require_project_access()
         def get(self, project_id):
-            """Get all members in project groups"""
+            """Get all members in project groups (requires project access)"""
             try:
                 conn = get_db_connection()
                 cur = conn.cursor(cursor_factory=RealDictCursor)

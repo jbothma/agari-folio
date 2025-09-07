@@ -347,6 +347,159 @@ def require_permissions(required_scopes):
     return decorator
 
 
+def require_project_access():
+    """Decorator to require project access based on privacy settings and group membership"""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            try:
+                # Get project_id from URL path parameters or request data
+                project_id = kwargs.get('project_id') or kwargs.get('id')
+                
+                if not project_id:
+                    return jsonify({'error': 'Project ID not found in request'}), 400
+                
+                # Import here to avoid circular imports
+                from app import get_db_connection
+                
+                # Get project privacy setting from database
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                
+                cursor.execute("SELECT slug, privacy FROM projects WHERE id = %s", (project_id,))
+                project = cursor.fetchone()
+                
+                if not project:
+                    cursor.close()
+                    conn.close()
+                    return jsonify({'error': 'Project not found'}), 404
+                
+                project_slug, privacy = project
+                cursor.close()
+                conn.close()
+                
+                # If project is public, allow access
+                if privacy == 'public':
+                    logger.info(f"Allowing access to public project {project_slug}")
+                    return f(*args, **kwargs)
+                
+                # For private projects, check group membership
+                username = g.user.get('preferred_username')
+                if not username:
+                    return jsonify({'error': 'User not authenticated'}), 401
+                
+                # Check if user is member of any project group (read, write, or admin)
+                for permission in ['read', 'write', 'admin']:
+                    group_name = f"project-{project_slug}-{permission}"
+                    group = get_project_group_by_name(group_name)
+                    
+                    if group:
+                        # Check if user is member of this group
+                        members = get_project_group_members(project_slug, permission)
+                        user_in_group = any(member['username'] == username for member in members)
+                        
+                        if user_in_group:
+                            logger.info(f"User {username} has {permission} access to private project {project_slug}")
+                            return f(*args, **kwargs)
+                
+                # User is not a member of any project group
+                logger.warning(f"User {username} denied access to private project {project_slug}")
+                return jsonify({'error': 'Access denied. You are not a member of this private project.'}), 403
+                
+            except Exception as e:
+                logger.error(f"Error checking project access: {e}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                return jsonify({'error': 'Authorization check failed'}), 500
+        
+        return decorated_function
+    return decorator
+
+
+def require_study_access():
+    """Decorator to require study access based on project privacy settings and group membership"""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            try:
+                # Get study_id from URL path parameters or request data
+                study_id = kwargs.get('study_id') or kwargs.get('id')
+                
+                if not study_id:
+                    return jsonify({'error': 'Study ID not found in request'}), 400
+                
+                # Import here to avoid circular imports
+                from app import get_db_connection
+                
+                # Get study and its project privacy setting from database
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT s.study_id, p.slug, p.privacy 
+                    FROM studies s 
+                    JOIN projects p ON s.project_id = p.id 
+                    WHERE s.id = %s
+                """, (study_id,))
+                study = cursor.fetchone()
+                
+                if not study:
+                    cursor.close()
+                    conn.close()
+                    return jsonify({'error': 'Study not found'}), 404
+                
+                study_code, project_slug, privacy = study
+                cursor.close()
+                conn.close()
+                
+                # If parent project is public, allow access
+                if privacy == 'public':
+                    logger.info(f"Allowing access to study {study_code} in public project {project_slug}")
+                    return f(*args, **kwargs)
+                
+                # For private projects, check group membership (project or study level)
+                username = g.user.get('preferred_username')
+                if not username:
+                    return jsonify({'error': 'User not authenticated'}), 401
+                
+                # Check project-level access first
+                for permission in ['read', 'write', 'admin']:
+                    group_name = f"project-{project_slug}-{permission}"
+                    group = get_project_group_by_name(group_name)
+                    
+                    if group:
+                        members = get_project_group_members(project_slug, permission)
+                        user_in_group = any(member['username'] == username for member in members)
+                        
+                        if user_in_group:
+                            logger.info(f"User {username} has {permission} access to study {study_code} via project {project_slug}")
+                            return f(*args, **kwargs)
+                
+                # Check study-level access
+                for permission in ['read', 'write']:
+                    group_name = f"study-{study_code}-{permission}"
+                    group = get_project_group_by_name(group_name)
+                    
+                    if group:
+                        members = get_study_group_members(study_code, permission)
+                        user_in_group = any(member['username'] == username for member in members)
+                        
+                        if user_in_group:
+                            logger.info(f"User {username} has {permission} access to study {study_code}")
+                            return f(*args, **kwargs)
+                
+                # User is not a member of any relevant group
+                logger.warning(f"User {username} denied access to study {study_code} in private project {project_slug}")
+                return jsonify({'error': 'Access denied. You are not a member of this private project or study.'}), 403
+                
+            except Exception as e:
+                logger.error(f"Error checking study access: {e}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                return jsonify({'error': 'Authorization check failed'}), 500
+        
+        return decorated_function
+    return decorator
+
+
 def get_project_group_members(project_code, permission):
     """Get all members of a project group with specific permission"""
     try:
@@ -412,5 +565,75 @@ def get_project_group_members(project_code, permission):
         
     except Exception as e:
         logger.error(f"Failed to get group members for {project_code}-{permission}: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return []
+
+
+def get_study_group_members(study_code, permission):
+    """Get members of a study group (read/write)"""
+    try:
+        service_token = get_service_token()
+        if not service_token:
+            logger.error("Failed to get service token")
+            return []
+        
+        headers = {
+            'Authorization': f'Bearer {service_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Construct group name
+        group_name = f"study-{study_code}-{permission}"
+        
+        # Search for the group
+        groups_response = requests.get(f"{KEYCLOAK_ADMIN_BASE_URI}/groups?search={group_name}", 
+                                     headers=headers, timeout=10)
+        
+        if groups_response.status_code != 200:
+            logger.error(f"Failed to search for group: {groups_response.status_code}")
+            return []
+        
+        groups = groups_response.json()
+        group = None
+        for g in groups:
+            if g['name'] == group_name:
+                group = g
+                break
+        
+        if not group:
+            logger.warning(f"Group '{group_name}' not found")
+            return []
+        
+        group_id = group['id']
+        
+        # Get group members
+        members_response = requests.get(f"{KEYCLOAK_ADMIN_BASE_URI}/groups/{group_id}/members", 
+                                      headers=headers, timeout=10)
+        
+        if members_response.status_code != 200:
+            logger.error(f"Failed to get group members: {members_response.status_code}")
+            return []
+        
+        members = members_response.json()
+        
+        # Extract relevant user info
+        member_list = []
+        for member in members:
+            member_info = {
+                'id': member.get('id'),
+                'username': member.get('username'),
+                'email': member.get('email'),
+                'firstName': member.get('firstName'),
+                'lastName': member.get('lastName'),
+                'enabled': member.get('enabled', False),
+                'created_at': member.get('createdTimestamp')
+            }
+            member_list.append(member_info)
+        
+        logger.info(f"Found {len(member_list)} members in study group '{group_name}'")
+        return member_list
+        
+    except Exception as e:
+        logger.error(f"Failed to get study group members for {study_code}-{permission}: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         return []
