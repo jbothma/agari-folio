@@ -165,6 +165,137 @@ def create_study_group_with_permission(study_id, permission):
         return False
 
 
+def create_study_policy(study_id, permission, group_id):
+    """Create a Keycloak policy for a study group"""
+    try:
+        policy_name = f"study-{study_id}-{permission}-policy"
+        logger.info(f"=== CREATING {permission.upper()} POLICY FOR STUDY: {study_id} ===")
+        
+        service_token = get_service_token()
+        if not service_token:
+            logger.error("Failed to get service token")
+            return False
+        
+        headers = {
+            'Authorization': f'Bearer {service_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Get DMS client ID
+        clients_response = requests.get(f"{KEYCLOAK_ADMIN_BASE_URI}/clients?clientId=dms", 
+                                      headers=headers, timeout=10)
+        if clients_response.status_code != 200:
+            logger.error(f"Failed to get DMS client: {clients_response.status_code}")
+            return False
+        
+        clients = clients_response.json()
+        if not clients:
+            logger.error("DMS client not found")
+            return False
+        
+        client_uuid = clients[0]['id']
+        
+        # Create group-based policy
+        policy_data = {
+            'name': policy_name,
+            'description': f'Policy for {permission} access to study {study_id}',
+            'type': 'group',
+            'logic': 'POSITIVE',
+            'decisionStrategy': 'UNANIMOUS',
+            'groups': [{'id': group_id, 'extendChildren': False}]
+        }
+        
+        # Create the policy using Keycloak Admin API
+        response = requests.post(f"{KEYCLOAK_ADMIN_BASE_URI}/clients/{client_uuid}/authz/resource-server/policy/group", 
+                               headers=headers, json=policy_data, timeout=10)
+        
+        if response.status_code == 201:
+            policy = response.json()
+            logger.info(f"Successfully created {permission} policy '{policy_name}' with ID: {policy.get('id')}")
+            return policy
+        elif response.status_code == 409:
+            logger.warning(f"{permission.capitalize()} policy for study '{study_id}' already exists")
+            # Try to get existing policy
+            policies_response = requests.get(f"{KEYCLOAK_ADMIN_BASE_URI}/clients/{client_uuid}/authz/resource-server/policy?name={policy_name}", 
+                                           headers=headers, timeout=10)
+            if policies_response.status_code == 200:
+                policies = policies_response.json()
+                if policies:
+                    return policies[0]
+            return None
+        else:
+            logger.error(f"Failed to create {permission} policy: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Failed to create {permission} policy for study {study_id}: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return False
+
+
+def create_study_permission(study_id, permission, resource_id, policy_id, scopes):
+    """Create a Keycloak permission linking policy to resource"""
+    try:
+        permission_name = f"study-{study_id}-{permission}-permission"
+        logger.info(f"=== CREATING {permission.upper()} PERMISSION FOR STUDY: {study_id} ===")
+        
+        service_token = get_service_token()
+        if not service_token:
+            logger.error("Failed to get service token")
+            return False
+        
+        headers = {
+            'Authorization': f'Bearer {service_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Get DMS client ID
+        clients_response = requests.get(f"{KEYCLOAK_ADMIN_BASE_URI}/clients?clientId=dms", 
+                                      headers=headers, timeout=10)
+        if clients_response.status_code != 200:
+            logger.error(f"Failed to get DMS client: {clients_response.status_code}")
+            return False
+        
+        clients = clients_response.json()
+        if not clients:
+            logger.error("DMS client not found")
+            return False
+        
+        client_uuid = clients[0]['id']
+        
+        # Create resource-based permission
+        permission_data = {
+            'name': permission_name,
+            'description': f'Permission for {permission} access to study {study_id}',
+            'type': 'resource',
+            'logic': 'POSITIVE',
+            'decisionStrategy': 'UNANIMOUS',
+            'resources': [resource_id],
+            'policies': [policy_id],
+            'scopes': scopes
+        }
+        
+        # Create the permission using Keycloak Admin API
+        response = requests.post(f"{KEYCLOAK_ADMIN_BASE_URI}/clients/{client_uuid}/authz/resource-server/permission/resource", 
+                               headers=headers, json=permission_data, timeout=10)
+        
+        if response.status_code == 201:
+            permission = response.json()
+            logger.info(f"Successfully created {permission} permission '{permission_name}' with ID: {permission.get('id')}")
+            return permission
+        elif response.status_code == 409:
+            logger.warning(f"{permission.capitalize()} permission for study '{study_id}' already exists")
+            return None
+        else:
+            logger.error(f"Failed to create {permission} permission: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Failed to create {permission} permission for study {study_id}: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return False
+
+
 def add_user_to_study_group_with_permission(study_id, username, permission):
     """Add a user to a study group with specific permission (read or write)"""
     try:
@@ -358,12 +489,34 @@ def setup_study_endpoints(api, studies_ns):
                         logger.warning(f"Failed to create study '{data['study_id']}' in SONG")
                     
                     # Create Keycloak resource for study
-                    create_study_resource(data['study_id'])
+                    resource = create_study_resource(data['study_id'])
                     logger.info(f"Ensured Keycloak resource exists for study: {data['study_id']}")
                     
-                    # Create permission groups (will handle existing groups gracefully)
+                    # Create permission groups and policies/permissions
                     for permission in ['read', 'write']:
+                        # Create the group
                         create_study_group_with_permission(data['study_id'], permission)
+                        
+                        # Get the group to extract its ID for policy creation
+                        from auth import get_project_group_by_name  # Reuse since it's generic
+                        group = get_project_group_by_name(f"study-{data['study_id']}-{permission}")
+                        if group and resource:
+                            group_id = group['id']
+                            resource_id = resource.get('_id')
+                            
+                            # Create policy for this group
+                            policy = create_study_policy(data['study_id'], permission, group_id)
+                            
+                            # Create permission linking policy to resource
+                            if policy:
+                                policy_id = policy.get('id')
+                                scopes = []
+                                if permission == 'read':
+                                    scopes = ['READ']
+                                elif permission == 'write':
+                                    scopes = ['READ', 'WRITE']
+                                
+                                create_study_permission(data['study_id'], permission, resource_id, policy_id, scopes)
                     
                     # Add the creating user to both read and write groups for this study
                     if add_user_to_study_group_with_permission(data['study_id'], g.user['username'], 'read'):

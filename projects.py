@@ -123,6 +123,137 @@ def create_project_group_with_permission(project_code, permission):
         return False
 
 
+def create_project_policy(project_code, permission, group_id):
+    """Create a Keycloak policy for a project group"""
+    try:
+        policy_name = f"project-{project_code}-{permission}-policy"
+        logger.info(f"=== CREATING {permission.upper()} POLICY FOR PROJECT: {project_code} ===")
+        
+        service_token = get_service_token()
+        if not service_token:
+            logger.error("Failed to get service token")
+            return False
+        
+        headers = {
+            'Authorization': f'Bearer {service_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Get DMS client ID
+        clients_response = requests.get(f"{KEYCLOAK_ADMIN_BASE_URI}/clients?clientId=dms", 
+                                      headers=headers, timeout=10)
+        if clients_response.status_code != 200:
+            logger.error(f"Failed to get DMS client: {clients_response.status_code}")
+            return False
+        
+        clients = clients_response.json()
+        if not clients:
+            logger.error("DMS client not found")
+            return False
+        
+        client_uuid = clients[0]['id']
+        
+        # Create group-based policy
+        policy_data = {
+            'name': policy_name,
+            'description': f'Policy for {permission} access to project {project_code}',
+            'type': 'group',
+            'logic': 'POSITIVE',
+            'decisionStrategy': 'UNANIMOUS',
+            'groups': [{'id': group_id, 'extendChildren': False}]
+        }
+        
+        # Create the policy using Keycloak Admin API
+        response = requests.post(f"{KEYCLOAK_ADMIN_BASE_URI}/clients/{client_uuid}/authz/resource-server/policy/group", 
+                               headers=headers, json=policy_data, timeout=10)
+        
+        if response.status_code == 201:
+            policy = response.json()
+            logger.info(f"Successfully created {permission} policy '{policy_name}' with ID: {policy.get('id')}")
+            return policy
+        elif response.status_code == 409:
+            logger.warning(f"{permission.capitalize()} policy for project '{project_code}' already exists")
+            # Try to get existing policy
+            policies_response = requests.get(f"{KEYCLOAK_ADMIN_BASE_URI}/clients/{client_uuid}/authz/resource-server/policy?name={policy_name}", 
+                                           headers=headers, timeout=10)
+            if policies_response.status_code == 200:
+                policies = policies_response.json()
+                if policies:
+                    return policies[0]
+            return None
+        else:
+            logger.error(f"Failed to create {permission} policy: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Failed to create {permission} policy for project {project_code}: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return False
+
+
+def create_project_permission(project_id, permission, resource_id, policy_id, scopes):
+    """Create a Keycloak permission linking policy to resource"""
+    try:
+        permission_name = f"project-{project_id}-{permission}-permission"
+        logger.info(f"=== CREATING {permission.upper()} PERMISSION FOR PROJECT: {project_id} ===")
+        
+        service_token = get_service_token()
+        if not service_token:
+            logger.error("Failed to get service token")
+            return False
+        
+        headers = {
+            'Authorization': f'Bearer {service_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Get DMS client ID
+        clients_response = requests.get(f"{KEYCLOAK_ADMIN_BASE_URI}/clients?clientId=dms", 
+                                      headers=headers, timeout=10)
+        if clients_response.status_code != 200:
+            logger.error(f"Failed to get DMS client: {clients_response.status_code}")
+            return False
+        
+        clients = clients_response.json()
+        if not clients:
+            logger.error("DMS client not found")
+            return False
+        
+        client_uuid = clients[0]['id']
+        
+        # Create resource-based permission
+        permission_data = {
+            'name': permission_name,
+            'description': f'Permission for {permission} access to project {project_id}',
+            'type': 'resource',
+            'logic': 'POSITIVE',
+            'decisionStrategy': 'UNANIMOUS',
+            'resources': [resource_id],
+            'policies': [policy_id],
+            'scopes': scopes
+        }
+        
+        # Create the permission using Keycloak Admin API
+        response = requests.post(f"{KEYCLOAK_ADMIN_BASE_URI}/clients/{client_uuid}/authz/resource-server/permission/resource", 
+                               headers=headers, json=permission_data, timeout=10)
+        
+        if response.status_code == 201:
+            permission = response.json()
+            logger.info(f"Successfully created {permission} permission '{permission_name}' with ID: {permission.get('id')}")
+            return permission
+        elif response.status_code == 409:
+            logger.warning(f"{permission.capitalize()} permission for project '{project_id}' already exists")
+            return None
+        else:
+            logger.error(f"Failed to create {permission} permission: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Failed to create {permission} permission for project {project_id}: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return False
+
+
 def add_user_to_project_group_with_permission(project_code, username, permission):
     """Add a user to a project group with specific permission (read, write, or admin)"""
     try:
@@ -391,12 +522,35 @@ def setup_project_endpoints(api, projects_ns):
                 # Create Keycloak resource and groups for project (optional - log if fails)
                 try:
                     # Always try to create/ensure groups exist, regardless of resource status
-                    create_project_resource(data['slug'])
+                    resource = create_project_resource(data['slug'])
                     logger.info(f"Ensured Keycloak resource exists for project: {data['slug']}")
                     
-                    # Create permission groups (will handle existing groups gracefully)
+                    # Create permission groups and policies/permissions
                     for permission in ['read', 'write', 'admin']:
+                        # Create the group
                         create_project_group_with_permission(data['slug'], permission)
+                        
+                        # Get the group to extract its ID for policy creation
+                        group = get_project_group_by_name(f"project-{data['slug']}-{permission}")
+                        if group and resource:
+                            group_id = group['id']
+                            resource_id = resource.get('_id')
+                            
+                            # Create policy for this group
+                            policy = create_project_policy(data['slug'], permission, group_id)
+                            
+                            # Create permission linking policy to resource
+                            if policy:
+                                policy_id = policy.get('id')
+                                scopes = []
+                                if permission == 'read':
+                                    scopes = ['READ']
+                                elif permission == 'write':
+                                    scopes = ['READ', 'WRITE']
+                                elif permission == 'admin':
+                                    scopes = ['READ', 'WRITE', 'ADMIN']
+                                
+                                create_project_permission(data['slug'], permission, resource_id, policy_id, scopes)
                     
                     # Add the creating user to the admin group for this project
                     if add_creator_to_project_admin_group(data['slug'], g.user['username']):
@@ -406,6 +560,7 @@ def setup_project_endpoints(api, projects_ns):
                     
                 except Exception as e:
                     logger.warning(f"Failed to create Keycloak resources for project {data['slug']}: {e}")
+                    logger.warning(f"Traceback: {traceback.format_exc()}")
                 
                 logger.info(f"Created project '{data['slug']}' by user: {g.user['username']}")
                 return result, 201
