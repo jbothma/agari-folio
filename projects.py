@@ -159,7 +159,7 @@ def create_project_policy(project_code, permission, group_id):
             'description': f'Policy for {permission} access to project {project_code}',
             'type': 'group',
             'logic': 'POSITIVE',
-            'decisionStrategy': 'POSITIVE',
+            'decisionStrategy': 'AFFIRMATIVE',
             'groups': [{'id': group_id, 'extendChildren': False}]
         }
         
@@ -227,7 +227,7 @@ def create_project_permission(project_id, permission, resource_id, policy_id, sc
             'description': f'Permission for {permission} access to project {project_id}',
             'type': 'resource',
             'logic': 'POSITIVE',
-            'decisionStrategy': 'POSITIVE',
+            'decisionStrategy': 'AFFIRMATIVE',
             'resources': [resource_id],
             'policies': [policy_id],
             'scopes': scopes
