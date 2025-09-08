@@ -400,6 +400,7 @@ def setup_project_endpoints(api, projects_ns):
         'pathogen_id': fields.String(description='Associated pathogen UUID'),
         'pathogen_name': fields.String(description='Associated pathogen name (read-only)', readonly=True),
         'privacy': fields.String(description='Project privacy setting (public/private)', enum=['public', 'private']),
+        'organisation_id': fields.String(description='Organisation ID (read-only)', readonly=True),
         'created_at': fields.DateTime(description='Creation timestamp (auto-generated)', readonly=True),
         'updated_at': fields.DateTime(description='Last update timestamp (auto-generated)', readonly=True)
     })
@@ -424,9 +425,9 @@ def setup_project_endpoints(api, projects_ns):
                 conn = get_db_connection()
                 cur = conn.cursor(cursor_factory=RealDictCursor)
                 
-                # Get all active projects with pathogen names and privacy
+                # Get all active projects with pathogen names, privacy, and organisation info
                 cur.execute("""
-                    SELECT p.id, p.slug, p.name, p.description, p.pathogen_id, p.privacy, p.created_at, p.updated_at,
+                    SELECT p.id, p.slug, p.name, p.description, p.pathogen_id, p.privacy, p.organisation_id, p.created_at, p.updated_at,
                            path.name as pathogen_name
                     FROM projects p
                     LEFT JOIN pathogens path ON p.pathogen_id = path.id AND path.deleted_at IS NULL
@@ -438,9 +439,10 @@ def setup_project_endpoints(api, projects_ns):
                 cur.close()
                 conn.close()
                 
-                # Filter projects based on privacy and user access
+                # Filter projects based on privacy, organisation membership, and user access
                 accessible_projects = []
                 username = g.user.get('preferred_username')
+                user_permissions = g.user.get('permissions', [])
                 
                 for project in all_projects:
                     project_dict = serialize_record(project)
@@ -450,27 +452,44 @@ def setup_project_endpoints(api, projects_ns):
                         accessible_projects.append(project_dict)
                         continue
                     
-                    # For private projects, check if user has access
+                    # For private projects, check organisation and project-level access
                     if project['privacy'] == 'private' and username:
                         has_access = False
+                        organisation_id = project['organisation_id']
                         
-                        # Check if user is member of any project group (read, write, or admin)
-                        for permission in ['read', 'write', 'admin']:
-                            try:
-                                group_name = f"project-{project['slug']}-{permission}"
-                                group = get_project_group_by_name(group_name)
-                                
-                                if group:
-                                    from auth import get_project_group_members
-                                    members = get_project_group_members(project['slug'], permission)
-                                    user_in_group = any(member['username'] == username for member in members)
+                        # Check organisation-level access first
+                        org_roles_with_access = [
+                            f"organisation-{organisation_id}-owner",
+                            f"organisation-{organisation_id}-admin", 
+                            f"organisation-{organisation_id}-contributor",
+                            f"organisation-{organisation_id}-viewer"
+                        ]
+                        
+                        # Check if user has any organisation-level role for this project's organisation
+                        for org_role in org_roles_with_access:
+                            if any(org_role in perm for perm in user_permissions):
+                                has_access = True
+                                logger.info(f"User {username} has organisation-level access to project {project['slug']} via {org_role}")
+                                break
+                        
+                        # If no organisation access, check project-specific groups
+                        if not has_access:
+                            for permission in ['read', 'write', 'admin']:
+                                try:
+                                    group_name = f"project-{project['slug']}-{permission}"
+                                    group = get_project_group_by_name(group_name)
                                     
-                                    if user_in_group:
-                                        has_access = True
-                                        break
-                            except Exception as e:
-                                logger.warning(f"Error checking group membership for {group_name}: {e}")
-                                continue
+                                    if group:
+                                        from auth import get_project_group_members
+                                        members = get_project_group_members(project['slug'], permission)
+                                        user_in_group = any(member['username'] == username for member in members)
+                                        
+                                        if user_in_group:
+                                            has_access = True
+                                            break
+                                except Exception as e:
+                                    logger.warning(f"Error checking group membership for {group_name}: {e}")
+                                    continue
                         
                         if has_access:
                             accessible_projects.append(project_dict)
@@ -530,24 +549,28 @@ def setup_project_endpoints(api, projects_ns):
                     
                     pathogen_name = pathogen['name']
                 
-                # Insert new project (with privacy support)
+                # Insert new project (with privacy and organisation support)
                 privacy = data.get('privacy', 'private')  # Default to private for security
                 if privacy not in ['public', 'private']:
                     cur.close()
                     conn.close()
                     return {"error": "Privacy must be 'public' or 'private'"}, 400
                 
+                # For now, all projects belong to 'default-org'
+                # In future, this would be determined from user's organisation context
+                organisation_id = 'default-org'
+                
                 cur.execute("""
-                    INSERT INTO projects (id, slug, name, description, pathogen_id, organization_id, user_id, privacy, created_at, updated_at)
+                    INSERT INTO projects (id, slug, name, description, pathogen_id, organisation_id, user_id, privacy, created_at, updated_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-                    RETURNING id, slug, name, description, pathogen_id, privacy, created_at, updated_at
+                    RETURNING id, slug, name, description, pathogen_id, organisation_id, privacy, created_at, updated_at
                 """, (
                     project_id,
                     data['slug'],
                     data['name'],
                     data.get('description'),
                     data.get('pathogen_id'),
-                    'default-org',  # TODO: Get from user context
+                    organisation_id,
                     g.user.get('sub', 'unknown'),  # User ID from token
                     privacy
                 ))
@@ -628,7 +651,7 @@ def setup_project_endpoints(api, projects_ns):
                 cur = conn.cursor(cursor_factory=RealDictCursor)
                 
                 cur.execute("""
-                    SELECT p.id, p.slug, p.name, p.description, p.pathogen_id, p.privacy, p.created_at, p.updated_at,
+                    SELECT p.id, p.slug, p.name, p.description, p.pathogen_id, p.privacy, p.organisation_id, p.created_at, p.updated_at,
                            path.name as pathogen_name
                     FROM projects p
                     LEFT JOIN pathogens path ON p.pathogen_id = path.id AND path.deleted_at IS NULL

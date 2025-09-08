@@ -348,7 +348,7 @@ def require_permissions(required_scopes):
 
 
 def require_project_access():
-    """Decorator to require project access based on privacy settings and group membership"""
+    """Decorator to require project access based on privacy settings, organisation roles, and project group membership"""
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
@@ -362,11 +362,11 @@ def require_project_access():
                 # Import here to avoid circular imports
                 from app import get_db_connection
                 
-                # Get project privacy setting from database
+                # Get project privacy setting and organisation from database
                 conn = get_db_connection()
                 cursor = conn.cursor()
                 
-                cursor.execute("SELECT slug, privacy FROM projects WHERE id = %s", (project_id,))
+                cursor.execute("SELECT slug, privacy, organisation_id FROM projects WHERE id = %s", (project_id,))
                 project = cursor.fetchone()
                 
                 if not project:
@@ -374,7 +374,7 @@ def require_project_access():
                     conn.close()
                     return jsonify({'error': 'Project not found'}), 404
                 
-                project_slug, privacy = project
+                project_slug, privacy, organisation_id = project
                 cursor.close()
                 conn.close()
                 
@@ -383,12 +383,29 @@ def require_project_access():
                     logger.info(f"Allowing access to public project {project_slug}")
                     return f(*args, **kwargs)
                 
-                # For private projects, check group membership
+                # For private projects, check organisation and project-level permissions
                 username = g.user.get('preferred_username')
                 if not username:
                     return jsonify({'error': 'User not authenticated'}), 401
                 
-                # Check if user is member of any project group (read, write, or admin)
+                # Check organisation-level access first (Owner, Organisation Admin, Organisation Contributor, Organisation Viewer)
+                user_permissions = g.user.get('permissions', [])
+                
+                # Check for organisation-level roles that grant access to all projects
+                org_roles_with_access = [
+                    f"organisation-{organisation_id}-owner",
+                    f"organisation-{organisation_id}-admin", 
+                    f"organisation-{organisation_id}-contributor",
+                    f"organisation-{organisation_id}-viewer"
+                ]
+                
+                # Check if user has any organisation-level role for this project's organisation
+                for org_role in org_roles_with_access:
+                    if any(org_role in perm for perm in user_permissions):
+                        logger.info(f"User {username} has organisation-level access via {org_role} to project {project_slug}")
+                        return f(*args, **kwargs)
+                
+                # Fall back to project-specific group membership check
                 for permission in ['read', 'write', 'admin']:
                     group_name = f"project-{project_slug}-{permission}"
                     group = get_project_group_by_name(group_name)
@@ -402,21 +419,21 @@ def require_project_access():
                             logger.info(f"User {username} has {permission} access to private project {project_slug}")
                             return f(*args, **kwargs)
                 
-                # User is not a member of any project group
+                # User is not a member of any relevant group or organisation role
                 logger.warning(f"User {username} denied access to private project {project_slug}")
-                return jsonify({'error': 'Access denied. You are not a member of this private project.'}), 403
+                return jsonify({'error': 'Access denied. You are not a member of this private project or organisation.'}), 403
                 
             except Exception as e:
                 logger.error(f"Error checking project access: {e}")
                 logger.error(f"Traceback: {traceback.format_exc()}")
-                return jsonify({'error': 'Authorization check failed'}), 500
+                return jsonify({'error': 'Authorisation check failed'}), 500
         
         return decorated_function
     return decorator
 
 
 def require_study_access():
-    """Decorator to require study access based on project privacy settings and group membership"""
+    """Decorator to require study access based on project privacy settings, organisation roles, and group membership"""
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
@@ -435,7 +452,7 @@ def require_study_access():
                 cursor = conn.cursor()
                 
                 cursor.execute("""
-                    SELECT s.study_id, p.slug, p.privacy 
+                    SELECT s.study_id, p.slug, p.privacy, p.organisation_id 
                     FROM studies s 
                     JOIN projects p ON s.project_id = p.id 
                     WHERE s.id = %s
@@ -447,7 +464,7 @@ def require_study_access():
                     conn.close()
                     return jsonify({'error': 'Study not found'}), 404
                 
-                study_code, project_slug, privacy = study
+                study_code, project_slug, privacy, organisation_id = study
                 cursor.close()
                 conn.close()
                 
@@ -456,12 +473,27 @@ def require_study_access():
                     logger.info(f"Allowing access to study {study_code} in public project {project_slug}")
                     return f(*args, **kwargs)
                 
-                # For private projects, check group membership (project or study level)
+                # For private projects, check organisation and project/study-level permissions
                 username = g.user.get('preferred_username')
                 if not username:
                     return jsonify({'error': 'User not authenticated'}), 401
                 
-                # Check project-level access first
+                # Check organisation-level access first
+                user_permissions = g.user.get('permissions', [])
+                
+                org_roles_with_access = [
+                    f"organisation-{organisation_id}-owner",
+                    f"organisation-{organisation_id}-admin", 
+                    f"organisation-{organisation_id}-contributor",
+                    f"organisation-{organisation_id}-viewer"
+                ]
+                
+                for org_role in org_roles_with_access:
+                    if any(org_role in perm for perm in user_permissions):
+                        logger.info(f"User {username} has organisation-level access via {org_role} to study {study_code}")
+                        return f(*args, **kwargs)
+                
+                # Check project-level access
                 for permission in ['read', 'write', 'admin']:
                     group_name = f"project-{project_slug}-{permission}"
                     group = get_project_group_by_name(group_name)
@@ -487,14 +519,14 @@ def require_study_access():
                             logger.info(f"User {username} has {permission} access to study {study_code}")
                             return f(*args, **kwargs)
                 
-                # User is not a member of any relevant group
+                # User is not a member of any relevant group or organisation role
                 logger.warning(f"User {username} denied access to study {study_code} in private project {project_slug}")
-                return jsonify({'error': 'Access denied. You are not a member of this private project or study.'}), 403
+                return jsonify({'error': 'Access denied. You are not a member of this private project, study, or organisation.'}), 403
                 
             except Exception as e:
                 logger.error(f"Error checking study access: {e}")
                 logger.error(f"Traceback: {traceback.format_exc()}")
-                return jsonify({'error': 'Authorization check failed'}), 500
+                return jsonify({'error': 'Authorisation check failed'}), 500
         
         return decorated_function
     return decorator
@@ -637,3 +669,41 @@ def get_study_group_members(study_code, permission):
         logger.error(f"Failed to get study group members for {study_code}-{permission}: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         return []
+
+
+def check_user_organisation_role(username, organisation_id, required_role_level):
+    """
+    Check if user has the required organisation-level role
+    
+    Args:
+        username: The username to check
+        organisation_id: The organisation ID to check against
+        required_role_level: Minimum role level required ('viewer', 'contributor', 'admin', 'owner')
+    
+    Returns:
+        bool: True if user has required role or higher
+    """
+    try:
+        # Define role hierarchy (higher index = higher permission)
+        role_hierarchy = ['viewer', 'contributor', 'admin', 'owner']
+        required_index = role_hierarchy.index(required_role_level)
+        
+        # Get user's permissions from JWT token context
+        user_permissions = g.user.get('permissions', [])
+        
+        # Check for organisation-level roles
+        for i, role in enumerate(role_hierarchy):
+            if i >= required_index:  # Check this role and all higher roles
+                org_role = f"organisation-{organisation_id}-{role}"
+                if any(org_role in perm for perm in user_permissions):
+                    logger.info(f"User {username} has organisation {role} access to organisation {organisation_id}")
+                    return True
+        
+        return False
+        
+    except ValueError:
+        logger.error(f"Invalid role level: {required_role_level}")
+        return False
+    except Exception as e:
+        logger.error(f"Error checking organisation role for {username}: {e}")
+        return False

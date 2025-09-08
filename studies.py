@@ -477,11 +477,13 @@ def setup_study_endpoints(api, studies_ns):
     # Define study models for Swagger
     study_model = api.model('Study', {
         'id': fields.String(description='Study UUID (auto-generated)', readonly=True),
+        'study_id': fields.String(required=True, description='Study ID (unique identifier for SONG)'),
         'name': fields.String(required=True, description='Study name'),
         'description': fields.String(description='Study description'),
         'project_id': fields.String(description='Associated project UUID'),
         'project_code': fields.String(description='Associated project code (read-only)', readonly=True),
         'project_name': fields.String(description='Associated project name (read-only)', readonly=True),
+        'organisation_id': fields.String(description='Associated organisation ID (read-only)', readonly=True),
         'pathogen_id': fields.String(description='Associated pathogen UUID (read-only)', readonly=True),
         'pathogen_name': fields.String(description='Associated pathogen name (read-only)', readonly=True),
         'created_at': fields.DateTime(description='Creation timestamp (auto-generated)', readonly=True),
@@ -509,8 +511,8 @@ def setup_study_endpoints(api, studies_ns):
                 
                 # Get all active studies with project and pathogen information
                 cur.execute("""
-                    SELECT s.id, s.name, s.description, s.project_id, s.created_at, s.updated_at,
-                           p.slug as project_code, p.name as project_name, p.pathogen_id,
+                    SELECT s.id, s.study_id, s.name, s.description, s.project_id, s.created_at, s.updated_at,
+                           p.slug as project_code, p.name as project_name, p.pathogen_id, p.organisation_id,
                            path.name as pathogen_name
                     FROM studies s
                     LEFT JOIN projects p ON s.project_id = p.id AND p.deleted_at IS NULL
@@ -559,7 +561,7 @@ def setup_study_endpoints(api, studies_ns):
                 
                 # Validate project_id and get project info
                 cur.execute("""
-                    SELECT p.slug, p.name, p.pathogen_id, path.name as pathogen_name
+                    SELECT p.slug, p.name, p.pathogen_id, p.organisation_id, path.name as pathogen_name
                     FROM projects p
                     LEFT JOIN pathogens path ON p.pathogen_id = path.id AND path.deleted_at IS NULL
                     WHERE p.id = %s AND p.deleted_at IS NULL
@@ -595,6 +597,7 @@ def setup_study_endpoints(api, studies_ns):
                 result['project_name'] = project['name']
                 result['pathogen_id'] = project['pathogen_id']
                 result['pathogen_name'] = project['pathogen_name']
+                result['organisation_id'] = project['organisation_id']
                 
                 # Create study in SONG and Keycloak resources (optional - log if fails)
                 try:
