@@ -25,13 +25,19 @@ logger = logging.getLogger(__name__)
 SONG_BASE_URI = "http://song.agari.svc.cluster.local:8080"
 
 
-def create_study_in_song(study_id, name, description, access_token):
-    """Create a study in SONG service"""
+def create_study_in_song(study_id, name, description):
+    """Create a study in SONG service using service token"""
     try:
         logger.info(f"=== CREATING STUDY IN SONG: {study_id} ===")
         
+        # Get service token instead of using user token
+        service_token = get_service_token()
+        if not service_token:
+            logger.error("Failed to get service token for SONG")
+            return False
+        
         headers = {
-            'Authorization': f'Bearer {access_token}',
+            'Authorization': f'Bearer {service_token}',
             'Content-Type': 'application/json'
         }
         
@@ -68,9 +74,31 @@ def create_study_in_song(study_id, name, description, access_token):
 
 
 def create_study_resource(study_id):
-    """Create a Keycloak resource for a study using UMA Resource Registration API"""
+    """Create Keycloak permissions for a study using the existing 'song' resource"""
     try:
-        logger.info(f"=== CREATING UMA RESOURCE FOR STUDY: {study_id} ===")
+        logger.info(f"=== CREATING STUDY PERMISSIONS FOR: {study_id} ===")
+        
+        # Instead of creating a new UMA resource, return a reference to the existing 'song' resource
+        # This ensures users get simple READ/WRITE scopes that SONG can properly match
+        song_resource = {
+            '_id': 'aa9aaeff-84ed-4c69-ade1-19179bedafd1',  # Song resource ID from realm
+            'name': 'song',
+            'study_id': study_id
+        }
+        
+        logger.info(f"Using existing song resource for study '{study_id}'")
+        return song_resource
+            
+    except Exception as e:
+        logger.error(f"Failed to setup study permissions: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return False
+
+
+def update_study_resource_scopes(study_id):
+    """Update an existing UMA resource to use correct scope format (READ, WRITE instead of STUDY.{study_id}.READ)"""
+    try:
+        logger.info(f"=== UPDATING UMA RESOURCE SCOPES FOR STUDY: {study_id} ===")
         
         service_token = get_service_token()
         if not service_token:
@@ -82,35 +110,50 @@ def create_study_resource(study_id):
             'Content-Type': 'application/json'
         }
         
-        # Create the resource using UMA Resource Registration API
-        # SONG expects scopes in format: STUDY.{study_id}.WRITE
-        resource_data = {
+        # First, find the existing resource
+        response = requests.get(f"{KEYCLOAK_UMA_RESOURCE_URI}?name={study_id}", headers=headers, timeout=10)
+        
+        if response.status_code != 200:
+            logger.error(f"Failed to find UMA resource: {response.status_code} - {response.text}")
+            return False
+            
+        resources = response.json()
+        if not resources:
+            logger.error(f"No UMA resource found with name '{study_id}'")
+            return False
+            
+        resource = resources[0]  # Get the first matching resource
+        resource_id = resource.get('_id')
+        
+        if not resource_id:
+            logger.error(f"No resource ID found for resource '{study_id}'")
+            return False
+        
+        # Update the resource with correct scopes
+        updated_data = {
             'name': study_id,
             'displayName': f"Study: {study_id}",
             'type': 'urn:folio:resources:study',
-            'scopes': [f'STUDY.{study_id}.READ', f'STUDY.{study_id}.WRITE'],
+            'scopes': ['READ', 'WRITE'],  # Use simple scopes, SONG will construct STUDY.{study_id}.WRITE internally
             'attributes': {
                 'study_id': [study_id],
                 'created_by': ['folio-service']
             }
         }
         
-        # Use UMA Resource Registration endpoint
-        response = requests.post(KEYCLOAK_UMA_RESOURCE_URI, headers=headers, json=resource_data, timeout=10)
+        # Update the resource
+        response = requests.put(f"{KEYCLOAK_UMA_RESOURCE_URI}/{resource_id}", 
+                               headers=headers, json=updated_data, timeout=10)
         
-        if response.status_code == 201:
-            resource = response.json()
-            logger.info(f"Successfully created UMA resource '{study_id}' with ID: {resource.get('_id')}")
-            return resource
-        elif response.status_code == 409:
-            logger.warning(f"UMA Resource '{study_id}' already exists")
-            return None
+        if response.status_code == 200:
+            logger.info(f"Successfully updated UMA resource '{study_id}' with correct scopes")
+            return True
         else:
-            logger.error(f"Failed to create UMA resource: {response.status_code} - {response.text}")
+            logger.error(f"Failed to update UMA resource: {response.status_code} - {response.text}")
             return False
             
     except Exception as e:
-        logger.error(f"Failed to create study resource: {e}")
+        logger.error(f"Failed to update study resource scopes: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         return False
 
@@ -264,20 +307,24 @@ def create_study_permission(study_id, permission, resource_id, policy_id, scopes
         
         client_uuid = clients[0]['id']
         
-        # Create resource-based permission
+        # Use the song resource ID instead of creating new resources
+        # This ensures users get simple READ/WRITE scopes that SONG expects
+        song_resource_id = "aa9aaeff-84ed-4c69-ade1-19179bedafd1"
+        
+        # Create scope-based permission (not resource-based) for the song resource
         permission_data = {
             'name': permission_name,
-            'description': f'Permission for {permission} access to study {study_id}',
-            'type': 'resource',
+            'description': f'Permission for {permission} access to study {study_id} via song resource',
+            'type': 'scope',
             'logic': 'POSITIVE',
             'decisionStrategy': 'AFFIRMATIVE',
-            'resources': [resource_id],
+            'resources': [song_resource_id],  # Reference existing song resource
             'policies': [policy_id],
-            'scopes': scopes
+            'scopes': scopes  # Simple READ, WRITE scopes
         }
         
         # Create the permission using Keycloak Admin API
-        response = requests.post(f"{KEYCLOAK_ADMIN_BASE_URI}/clients/{client_uuid}/authz/resource-server/permission/resource", 
+        response = requests.post(f"{KEYCLOAK_ADMIN_BASE_URI}/clients/{client_uuid}/authz/resource-server/permission/scope", 
                                headers=headers, json=permission_data, timeout=10)
         
         if response.status_code == 201:
@@ -543,9 +590,8 @@ def setup_study_endpoints(api, studies_ns):
         @studies_ns.response(401, 'Invalid or missing token')
         @studies_ns.response(403, 'Insufficient permissions')
         @authenticate_token
-        @require_permissions(["folio.WRITE"])
         def post(self):
-            """Create a new study (requires folio.WRITE permission)"""
+            """Create a new study (requires project-specific folio.WRITE permission)"""
             try:
                 data = studies_ns.payload
                 
@@ -571,7 +617,27 @@ def setup_study_endpoints(api, studies_ns):
                 if not project:
                     cur.close()
                     conn.close()
-                    return {"error": "Invalid project_id provided"}, 400
+                    return {"error": "Project not found"}, 404
+                
+                # Check project-specific permissions
+                user_permissions = set(g.user.get('permissions', []))
+                required_permissions = [
+                    f"{project['slug']}.folio.WRITE",
+                    f"{project['slug']}.folio.ADMIN",
+                    "folio.WRITE"  # fallback to general permission
+                ]
+                
+                has_permission = any(perm in user_permissions for perm in required_permissions)
+                
+                if not has_permission:
+                    cur.close()
+                    conn.close()
+                    logger.warning(f"User {g.user.get('username')} lacks permissions for project {project['slug']}. Required: {required_permissions}, Has: {list(user_permissions)}")
+                    return {
+                        'error': f'Insufficient permissions for project {project["slug"]}. Required: WRITE or ADMIN access.',
+                        'required_permissions': required_permissions,
+                        'user_permissions': list(user_permissions)
+                    }, 403
                 
                 # Insert new study
                 cur.execute("""
@@ -601,10 +667,9 @@ def setup_study_endpoints(api, studies_ns):
                 
                 # Create study in SONG and Keycloak resources (optional - log if fails)
                 try:
-                    # Create study in SONG using user's token
-                    user_token = g.token  # User's JWT token from auth
+                    # Create study in SONG using service token
                     song_result = create_study_in_song(data['study_id'], data['name'], 
-                                                     data.get('description'), user_token)
+                                                     data.get('description'))
                     if song_result:
                         logger.info(f"Successfully created study '{data['study_id']}' in SONG")
                     elif song_result is None:
@@ -636,9 +701,9 @@ def setup_study_endpoints(api, studies_ns):
                                 policy_id = policy.get('id')
                                 scopes = []
                                 if permission == 'read':
-                                    scopes = [f'STUDY.{data["study_id"]}.READ']
+                                    scopes = ['READ']
                                 elif permission == 'write':
-                                    scopes = [f'STUDY.{data["study_id"]}.READ', f'STUDY.{data["study_id"]}.WRITE']
+                                    scopes = ['READ', 'WRITE']
                                 
                                 create_study_permission(data['study_id'], permission, resource_id, policy_id, scopes)
                     
@@ -912,9 +977,8 @@ def setup_study_endpoints(api, studies_ns):
         @studies_ns.response(403, 'Insufficient permissions')
         @studies_ns.response(404, 'Study or user not found')
         @authenticate_token
-        @require_permissions(["folio.WRITE"])
         def post(self, study_id):
-            """Add a user to a study group"""
+            """Add a user to a study group (requires project-specific folio.WRITE or folio.ADMIN permission)"""
             try:
                 data = studies_ns.payload
                 
@@ -927,14 +991,39 @@ def setup_study_endpoints(api, studies_ns):
                 conn = get_db_connection()
                 cur = conn.cursor(cursor_factory=RealDictCursor)
                 
-                # Check if study exists and get study_id (the SONG identifier)
-                cur.execute("SELECT study_id, name FROM studies WHERE id = %s AND deleted_at IS NULL", (study_id,))
+                # Check if study exists and get study info + project info
+                cur.execute("""
+                    SELECT s.study_id, s.name, p.slug as project_slug, p.name as project_name
+                    FROM studies s
+                    JOIN projects p ON s.project_id = p.id AND p.deleted_at IS NULL
+                    WHERE s.id = %s AND s.deleted_at IS NULL
+                """, (study_id,))
                 study = cur.fetchone()
                 
                 if not study:
                     cur.close()
                     conn.close()
                     return {"error": "Study not found"}, 404
+                
+                # Check project-specific permissions
+                user_permissions = set(g.user.get('permissions', []))
+                required_permissions = [
+                    f"{study['project_slug']}.folio.WRITE",
+                    f"{study['project_slug']}.folio.ADMIN",
+                    "folio.WRITE"  # fallback to general permission
+                ]
+                
+                has_permission = any(perm in user_permissions for perm in required_permissions)
+                
+                if not has_permission:
+                    cur.close()
+                    conn.close()
+                    logger.warning(f"User {g.user.get('username')} lacks permissions for project {study['project_slug']}. Required: {required_permissions}, Has: {list(user_permissions)}")
+                    return {
+                        'error': f'Insufficient permissions for project {study["project_slug"]}. Required: WRITE or ADMIN access.',
+                        'required_permissions': required_permissions,
+                        'user_permissions': list(user_permissions)
+                    }, 403
                 
                 cur.close()
                 conn.close()
@@ -971,9 +1060,8 @@ def setup_study_endpoints(api, studies_ns):
         @studies_ns.response(403, 'Insufficient permissions')
         @studies_ns.response(404, 'Study or user not found')
         @authenticate_token
-        @require_permissions(["folio.WRITE"])
         def delete(self, study_id):
-            """Remove a user from a study group"""
+            """Remove a user from a study group (requires project-specific folio.WRITE or folio.ADMIN permission)"""
             try:
                 data = studies_ns.payload
                 
@@ -985,6 +1073,40 @@ def setup_study_endpoints(api, studies_ns):
                 
                 conn = get_db_connection()
                 cur = conn.cursor(cursor_factory=RealDictCursor)
+                
+                # Check if study exists and get study info + project info
+                cur.execute("""
+                    SELECT s.study_id, s.name, p.slug as project_slug, p.name as project_name
+                    FROM studies s
+                    JOIN projects p ON s.project_id = p.id AND p.deleted_at IS NULL
+                    WHERE s.id = %s AND s.deleted_at IS NULL
+                """, (study_id,))
+                study = cur.fetchone()
+                
+                if not study:
+                    cur.close()
+                    conn.close()
+                    return {"error": "Study not found"}, 404
+                
+                # Check project-specific permissions
+                user_permissions = set(g.user.get('permissions', []))
+                required_permissions = [
+                    f"{study['project_slug']}.folio.WRITE",
+                    f"{study['project_slug']}.folio.ADMIN",
+                    "folio.WRITE"  # fallback to general permission
+                ]
+                
+                has_permission = any(perm in user_permissions for perm in required_permissions)
+                
+                if not has_permission:
+                    cur.close()
+                    conn.close()
+                    logger.warning(f"User {g.user.get('username')} lacks permissions for project {study['project_slug']}. Required: {required_permissions}, Has: {list(user_permissions)}")
+                    return {
+                        'error': f'Insufficient permissions for project {study["project_slug"]}. Required: WRITE or ADMIN access.',
+                        'required_permissions': required_permissions,
+                        'user_permissions': list(user_permissions)
+                    }, 403
                 
                 # Check if study exists and get study_id (the SONG identifier)
                 cur.execute("SELECT study_id, name FROM studies WHERE id = %s AND deleted_at IS NULL", (study_id,))

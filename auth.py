@@ -41,17 +41,22 @@ def get_service_token():
             'Content-Type': 'application/x-www-form-urlencoded'
         }
         
+        # Request service token with SONG and SCORE scopes
         data = {
             'grant_type': 'client_credentials',
             'client_id': KEYCLOAK_CLIENT_ID,
-            'client_secret': KEYCLOAK_CLIENT_SECRET
+            'client_secret': KEYCLOAK_CLIENT_SECRET,
+            'scope': 'song.READ song.WRITE score.READ score.WRITE'
         }
         
         response = requests.post(KEYCLOAK_PERMISSION_URI, headers=headers, data=data, timeout=10)
         response.raise_for_status()
         
         token_data = response.json()
+        logger.info(f"Service token response: {token_data}")
         access_token = token_data.get('access_token')
+        scope = token_data.get('scope', 'no scope returned')
+        logger.info(f"Service token scope: {scope}")
         
         if access_token:
             logger.info("Successfully obtained service token")
@@ -212,13 +217,22 @@ def get_rpt_permissions(access_token):
             permissions = response.json()
             logger.info(f"RPT permissions response: {permissions}")
             return permissions
-        else:
-            logger.error(f"Failed to get RPT permissions: {response.status_code} - {response.text}")
+        elif response.status_code == 403:
+            # 403 means token is valid but user has no permissions - this is expected for non-admin users
+            logger.info(f"User has valid token but no UMA permissions (403 response)")
             return []
+        elif response.status_code == 401:
+            # 401 means invalid token - authentication failure
+            logger.error(f"Invalid token for RPT permissions: {response.status_code} - {response.text}")
+            return False
+        else:
+            # Other errors (400, 500, etc.) - treat as authentication failure
+            logger.error(f"Failed to get RPT permissions: {response.status_code} - {response.text}")
+            return False
             
     except Exception as e:
         logger.error(f"Failed to fetch RPT permissions: {e}")
-        return []
+        return False
 
 
 def extract_scopes_from_rpt(permissions):
@@ -248,11 +262,23 @@ def validate_jwt_token(token):
             logger.info(f"Token from user: {payload.get('preferred_username', 'unknown')}")
         except:
             logger.info("Could not decode token for logging")
+            payload = {}
         
         # The real validation: try to get RPT permissions from Keycloak
-        # If this works, the token is valid!
+        # This validates both token authenticity AND authorization
         rpt_permissions = get_rpt_permissions(token)
         granted_scopes = extract_scopes_from_rpt(rpt_permissions)
+        
+        # CRITICAL SECURITY FIX: Check if RPT request failed
+        # If get_rpt_permissions returned False (error) or empty list due to 
+        # authorization failure, we should treat this as authentication failure
+        if rpt_permissions is False:
+            logger.error("RPT permissions request failed - treating as invalid token")
+            return None
+        
+        # IMPORTANT: For UMA with ENFORCING mode, empty permissions list might be valid
+        # (user authenticated but has no permissions). This is different from request failure.
+        # The require_permissions decorator will handle empty permissions appropriately.
         
         # Return validated payload with RPT permissions
         return {
@@ -277,6 +303,7 @@ def extract_user_info(payload):
     # Extract user information
     user_info = {
         "username": payload.get("preferred_username", "unknown"),
+        "preferred_username": payload.get("preferred_username", "unknown"),
         "email": payload.get("email"),
         "name": payload.get("name"),
         "sub": payload.get("sub"),

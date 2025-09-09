@@ -9,8 +9,6 @@ from flask import Flask
 from flask_restx import Api, Resource, fields
 import logging
 
-# Import modular components
-from auth import authenticate_token
 from pathogens import setup_pathogen_endpoints
 from projects import setup_project_endpoints
 from studies import setup_study_endpoints

@@ -28,11 +28,14 @@ def create_project_resource(project_code):
     """Create a Keycloak resource for a project using UMA Resource Registration API"""
     try:
         logger.info(f"=== CREATING UMA RESOURCE FOR PROJECT: {project_code} ===")
+        logger.info(f"UMA Resource Registration URI: {KEYCLOAK_UMA_RESOURCE_URI}")
         
         service_token = get_service_token()
         if not service_token:
             logger.error("Failed to get service token")
             return False
+        
+        logger.info(f"Got service token for UMA resource creation (length: {len(service_token)})")
         
         headers = {
             'Authorization': f'Bearer {service_token}',
@@ -51,8 +54,14 @@ def create_project_resource(project_code):
             }
         }
         
+        logger.info(f"About to POST to UMA Resource Registration API with data: {resource_data}")
+        
         # Use UMA Resource Registration endpoint
         response = requests.post(KEYCLOAK_UMA_RESOURCE_URI, headers=headers, json=resource_data, timeout=10)
+        
+        logger.info(f"UMA Resource Registration API response: {response.status_code}")
+        logger.info(f"Response headers: {dict(response.headers)}")
+        logger.info(f"Response text: {response.text}")
         
         if response.status_code == 201:
             resource = response.json()
@@ -586,8 +595,11 @@ def setup_project_endpoints(api, projects_ns):
                 
                 # Create Keycloak resource and groups for project (optional - log if fails)
                 try:
+                    logger.info(f"=== ENTERING KEYCLOAK RESOURCE CREATION TRY BLOCK ===")
                     # Always try to create/ensure groups exist, regardless of resource status
+                    logger.info(f"=== BEFORE CALLING create_project_resource() for project: {data['slug']} ===")
                     resource = create_project_resource(data['slug'])
+                    logger.info(f"=== AFTER CALLING create_project_resource() - Result: {resource} ===")
                     logger.info(f"Ensured Keycloak resource exists for project: {data['slug']}")
                     
                     # Create permission groups and policies/permissions
