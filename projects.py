@@ -518,15 +518,33 @@ def setup_project_endpoints(api, projects_ns):
         @projects_ns.response(403, 'Insufficient permissions')
         @projects_ns.response(409, 'Project code already exists')
         @authenticate_token
-        @require_permissions(["folio.WRITE"])
         def post(self):
-            """Create a new project (requires folio.WRITE permission)"""
+            """Create a new project (requires organisation owner/admin role or folio.WRITE permission)"""
             try:
                 data = projects_ns.payload
                 
                 # Validate required fields
                 if not data or not data.get('slug') or not data.get('name'):
                     return {"error": "Project slug and name are required"}, 400
+
+                # Check permissions: Allow folio.WRITE OR organisation owner/admin roles
+                user_permissions = set(g.user.get('permissions', []))
+                username = g.user.get('preferred_username')
+                
+                # Check if user has global folio.WRITE permission
+                has_global_write = 'folio.WRITE' in user_permissions
+                
+                # Check if user has organisation owner or admin role
+                # For now, check against default-org (in future, use proper organisation context)
+                organisation_id = data.get('organisation_id', 'default-org')
+                has_org_owner = f'organisation-{organisation_id}-owner' in [p for p in user_permissions]
+                has_org_admin = f'organisation-{organisation_id}-admin' in [p for p in user_permissions]
+                
+                if not (has_global_write or has_org_owner or has_org_admin):
+                    return {
+                        'error': 'Insufficient permissions. Project creation requires organisation owner/admin role or folio.WRITE permission.',
+                        'user_permissions': list(user_permissions)
+                    }, 403
                 
                 # Generate UUID for project
                 project_id = str(uuid.uuid4())
