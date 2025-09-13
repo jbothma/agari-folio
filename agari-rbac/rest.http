@@ -1,0 +1,167 @@
+# AGARI Folio RBAC API Testing
+
+# Keycloak Configuration
+@keycloak_host = http://keycloak.local
+@realm = agari
+@client_id = dms
+@client_secret = VDyLEjGR3xDQvoQlrHq5AB6OwbW0Refc
+
+# Folio API
+@folio_host = http://folio.local
+
+# Test Users (from agari-realm-rbac.json)
+@system_admin_username = system.admin@agari.tech
+@system_admin_password = pass123
+
+@org_owner_username = owner@org1.ac.za
+@org_owner_password = pass123
+
+@org_admin_username = org-admin@org1.ac.za
+@org_admin_password = pass123
+
+@project_admin_username = project-admin@org1.ac.za
+@project_admin_password = pass123
+
+@contributor_username = contributor@org1.ac.za
+@contributor_password = pass123
+
+@viewer_username = viewer@org1.ac.za
+@viewer_password = pass123
+
+# ===== AUTHENTICATION TESTS =====
+
+### 1. Get token for System Admin
+# @name system_admin_login
+POST {{keycloak_host}}/realms/{{realm}}/protocol/openid-connect/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password&client_id={{client_id}}&client_secret={{client_secret}}&username={{system_admin_username}}&password={{system_admin_password}}
+
+### 2. Get token for Org Owner
+# @name org_owner_login
+POST {{keycloak_host}}/realms/{{realm}}/protocol/openid-connect/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password&client_id={{client_id}}&client_secret={{client_secret}}&username={{org_owner_username}}&password={{org_owner_password}}
+
+### 3. Get token for Org Admin
+# @name org_admin_login
+POST {{keycloak_host}}/realms/{{realm}}/protocol/openid-connect/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password&client_id={{client_id}}&client_secret={{client_secret}}&username={{org_admin_username}}&password={{org_admin_password}}
+
+### 4. Get token for Project Admin
+# @name project_admin_login
+POST {{keycloak_host}}/realms/{{realm}}/protocol/openid-connect/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password&client_id={{client_id}}&client_secret={{client_secret}}&username={{project_admin_username}}&password={{project_admin_password}}
+
+### 5. Get token for Contributor
+# @name contributor_login
+POST {{keycloak_host}}/realms/{{realm}}/protocol/openid-connect/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password&client_id={{client_id}}&client_secret={{client_secret}}&username={{contributor_username}}&password={{contributor_password}}
+
+### 6. Get token for Viewer
+# @name viewer_login
+POST {{keycloak_host}}/realms/{{realm}}/protocol/openid-connect/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password&client_id={{client_id}}&client_secret={{client_secret}}&username={{viewer_username}}&password={{viewer_password}}
+
+# ===== FOLIO API TESTS =====
+
+### Health Check (No auth required)
+GET {{folio_host}}/health
+
+### Get Permissions Matrix (No auth required)
+GET {{folio_host}}/permissions/matrix
+
+# ===== SYSTEM ADMIN TESTS =====
+
+### System Admin - Who Am I
+GET {{folio_host}}/auth/whoami
+Authorization: Bearer {{system_admin_login.response.body.access_token}}
+
+### System Admin - My Permissions
+GET {{folio_host}}/permissions/my-permissions
+Authorization: Bearer {{system_admin_login.response.body.access_token}}
+
+### System Admin - Can Create Pathogen? (Should be YES)
+GET {{folio_host}}/permissions/check/create_pathogen
+Authorization: Bearer {{system_admin_login.response.body.access_token}}
+
+### System Admin - Can Create Project? (Should be YES)
+GET {{folio_host}}/permissions/check/create_project
+Authorization: Bearer {{system_admin_login.response.body.access_token}}
+
+### System Admin - Can Upload Data? (Should be YES)
+GET {{folio_host}}/permissions/check/upload_data
+Authorization: Bearer {{system_admin_login.response.body.access_token}}
+
+# ===== ORG OWNER TESTS =====
+
+### Org Owner - Who Am I
+GET {{folio_host}}/auth/whoami
+Authorization: Bearer {{org_owner_login.response.body.access_token}}
+
+### Org Owner - Can Create Pathogen? (Should be NO)
+GET {{folio_host}}/permissions/check/create_pathogen
+Authorization: Bearer {{org_owner_login.response.body.access_token}}
+
+### Org Owner - Can Create Project? (Should be YES)
+GET {{folio_host}}/permissions/check/create_project
+Authorization: Bearer {{org_owner_login.response.body.access_token}}
+
+### Org Owner - Can Manage Organisation Settings? (Should be YES)
+GET {{folio_host}}/permissions/check/manage_organisation_settings
+Authorization: Bearer {{org_owner_login.response.body.access_token}}
+
+# ===== CONTRIBUTOR TESTS =====
+
+### Contributor - Who Am I
+GET {{folio_host}}/auth/whoami
+Authorization: Bearer {{contributor_login.response.body.access_token}}
+
+### Contributor - Can Upload Data? (Should be YES)
+GET {{folio_host}}/permissions/check/upload_data
+Authorization: Bearer {{contributor_login.response.body.access_token}}
+
+### Contributor - Can Create Project? (Should be NO)
+GET {{folio_host}}/permissions/check/create_project
+Authorization: Bearer {{contributor_login.response.body.access_token}}
+
+### Contributor - Can View Published Data? (Should be YES)
+GET {{folio_host}}/permissions/check/view_published_sample_data
+Authorization: Bearer {{contributor_login.response.body.access_token}}
+
+# ===== VIEWER TESTS =====
+
+### Viewer - Who Am I
+GET {{folio_host}}/auth/whoami
+Authorization: Bearer {{viewer_login.response.body.access_token}}
+
+### Viewer - Can View Published Data? (Should be YES)
+GET {{folio_host}}/permissions/check/view_published_sample_data
+Authorization: Bearer {{viewer_login.response.body.access_token}}
+
+### Viewer - Can Upload Data? (Should be NO)
+GET {{folio_host}}/permissions/check/upload_data
+Authorization: Bearer {{viewer_login.response.body.access_token}}
+
+### Viewer - Can Create Project? (Should be NO)
+GET {{folio_host}}/permissions/check/create_project
+Authorization: Bearer {{viewer_login.response.body.access_token}}
+
+# ===== CROSS-USER COMPARISON =====
+
+### Compare permissions: System Admin vs Viewer
+GET {{folio_host}}/permissions/my-permissions
+Authorization: Bearer {{system_admin_login.response.body.access_token}}
+
+###
+GET {{folio_host}}/permissions/my-permissions
+Authorization: Bearer {{viewer_login.response.body.access_token}}
