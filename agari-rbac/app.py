@@ -12,12 +12,25 @@ import jwt
 import os
 from functools import wraps
 
+# Import database and models
+from database import check_db_connection, init_database
+from models import Pathogen, Project, Study
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Create Flask application
 app = Flask(__name__)
+
+# Initialize database when the app starts
+with app.app_context():
+    try:
+        logger.info("Initializing database...")
+        init_database()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
 
 # Initialize Flask-RESTX for Swagger documentation
 api = Api(
@@ -138,12 +151,183 @@ class HealthCheck(Resource):
     @api.doc('health_check')
     def get(self):
         """Health check endpoint"""
+        db_status = "connected" if check_db_connection() else "disconnected"
+        
         return {
-            "status": "healthy",
-            "message": "AGARI RBAC API is running",
-            "version": "1.0"
+            "status": "healthy" if db_status == "connected" else "degraded",
+            "message": "AGARI Folio API is running",
+            "version": "1.0",
+            "database": db_status
         }
 
+
+# Data Management Namespaces
+pathogens_ns = api.namespace('pathogens', description='Pathogen management operations')
+
+# Pathogen management endpoints
+@pathogens_ns.route('')
+class PathogenList(Resource):
+    @api.doc('list_pathogens')
+    def get(self):
+        """Get all pathogens"""
+        try:
+            pathogens = Pathogen.get_all()
+            return {
+                "status": "success",
+                "data": pathogens,
+                "count": len(pathogens)
+            }
+        except Exception as e:
+            logger.error(f"Failed to fetch pathogens: {e}")
+            return {
+                "status": "error",
+                "message": f"Failed to fetch pathogens: {str(e)}"
+            }, 500
+    
+    @api.doc('create_pathogen')
+    @api.expect(api.model('PathogenCreate', {
+        'name': fields.String(required=True, description='Pathogen name'),
+        'scientific_name': fields.String(description='Scientific name'),
+        'description': fields.String(description='Description')
+    }))
+    @authenticate_token
+    def post(self):
+        """Create a new pathogen (requires create_pathogen permission)"""
+        user_roles = g.user.get('roles', [])
+        if 'create_pathogen' not in get_user_permissions(user_roles):
+            return {
+                "status": "error",
+                "message": "Insufficient permissions to create pathogen"
+            }, 403
+        
+        try:
+            data = request.json
+            pathogen = Pathogen.create(
+                name=data['name'],
+                scientific_name=data.get('scientific_name'),
+                description=data.get('description')
+            )
+            return {
+                "status": "success",
+                "data": pathogen
+            }, 201
+        except Exception as e:
+            logger.error(f"Failed to create pathogen: {e}")
+            return {
+                "status": "error",
+                "message": f"Failed to create pathogen: {str(e)}"
+            }, 500
+
+@pathogens_ns.route('/<string:pathogen_id>')
+class PathogenDetail(Resource):
+    @api.doc('get_pathogen')
+    def get(self, pathogen_id):
+        """Get a specific pathogen by ID"""
+        try:
+            pathogen = Pathogen.get_by_id(pathogen_id)
+            if not pathogen:
+                return {
+                    "status": "error",
+                    "message": "Pathogen not found"
+                }, 404
+            
+            return {
+                "status": "success",
+                "data": pathogen
+            }
+        except Exception as e:
+            logger.error(f"Failed to fetch pathogen: {e}")
+            return {
+                "status": "error",
+                "message": f"Failed to fetch pathogen: {str(e)}"
+            }, 500
+    
+    @api.doc('update_pathogen')
+    @api.expect(api.model('PathogenUpdate', {
+        'name': fields.String(description='Pathogen name'),
+        'scientific_name': fields.String(description='Scientific name'),
+        'description': fields.String(description='Description')
+    }))
+    @authenticate_token
+    def put(self, pathogen_id):
+        """Update a pathogen (requires edit_pathogen permission)"""
+        user_roles = g.user.get('roles', [])
+        if 'edit_pathogen' not in get_user_permissions(user_roles):
+            return {
+                "status": "error",
+                "message": "Insufficient permissions to edit pathogen"
+            }, 403
+        
+        try:
+            # Check if pathogen exists
+            existing_pathogen = Pathogen.get_by_id(pathogen_id)
+            if not existing_pathogen:
+                return {
+                    "status": "error",
+                    "message": "Pathogen not found"
+                }, 404
+            
+            # Update pathogen
+            data = request.json or {}
+            updated_pathogen = Pathogen.update(pathogen_id, **data)
+            
+            return {
+                "status": "success",
+                "data": updated_pathogen,
+                "message": "Pathogen updated successfully"
+            }
+        except Exception as e:
+            logger.error(f"Failed to update pathogen: {e}")
+            return {
+                "status": "error",
+                "message": f"Failed to update pathogen: {str(e)}"
+            }, 500
+    
+    @api.doc('delete_pathogen')
+    @authenticate_token
+    def delete(self, pathogen_id):
+        """Delete a pathogen (requires delete_pathogen permission)"""
+        user_roles = g.user.get('roles', [])
+        if 'delete_pathogen' not in get_user_permissions(user_roles):
+            return {
+                "status": "error",
+                "message": "Insufficient permissions to delete pathogen"
+            }, 403
+        
+        try:
+            # Check if pathogen exists
+            existing_pathogen = Pathogen.get_by_id(pathogen_id)
+            if not existing_pathogen:
+                return {
+                    "status": "error",
+                    "message": "Pathogen not found"
+                }, 404
+            
+            # Check if pathogen is referenced by any projects
+            if Pathogen.is_referenced_by_projects(pathogen_id):
+                return {
+                    "status": "error",
+                    "message": "Cannot delete pathogen: it is referenced by one or more projects"
+                }, 409  # Conflict
+            
+            # Soft delete the pathogen
+            deleted = Pathogen.delete(pathogen_id)
+            if deleted:
+                return {
+                    "status": "success",
+                    "message": "Pathogen deleted successfully"
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": "Failed to delete pathogen"
+                }, 500
+        except Exception as e:
+            logger.error(f"Failed to delete pathogen: {e}")
+            return {
+                "status": "error",
+                "message": f"Failed to delete pathogen: {str(e)}"
+            }, 500
 
 # Error handlers
 @app.errorhandler(404)
@@ -157,4 +341,13 @@ def internal_error(error):
 
 
 if __name__ == '__main__':
+    # Initialize database on startup
+    try:
+        logger.info("Initializing database...")
+        init_database()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        # Continue running even if database init fails to allow debugging
+    
     app.run(host='0.0.0.0', port=5001, debug=True)

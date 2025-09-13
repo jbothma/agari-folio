@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS pathogens (
     name VARCHAR(255) NOT NULL UNIQUE,
     scientific_name VARCHAR(255),
     description TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_T
+    IMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP WITH TIME ZONE NULL
 );
@@ -25,6 +26,7 @@ CREATE TABLE IF NOT EXISTS projects (
     user_id VARCHAR(255) NOT NULL, -- Keycloak user ID of creator
     pathogen_id UUID REFERENCES pathogens(id),
     privacy VARCHAR(20) DEFAULT 'public' CHECK (privacy IN ('public', 'private')),
+    status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'completed', 'archived')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP WITH TIME ZONE NULL
@@ -39,6 +41,7 @@ CREATE TABLE IF NOT EXISTS studies (
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     start_date DATE,
     end_date DATE,
+    status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'completed', 'archived')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP WITH TIME ZONE NULL
@@ -47,11 +50,13 @@ CREATE TABLE IF NOT EXISTS studies (
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_projects_slug ON projects(slug);
 CREATE INDEX IF NOT EXISTS idx_projects_pathogen ON projects(pathogen_id);
+CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
 CREATE INDEX IF NOT EXISTS idx_projects_organisation ON projects(organisation_id);
 CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id);
 CREATE INDEX IF NOT EXISTS idx_projects_privacy ON projects(privacy);
 CREATE INDEX IF NOT EXISTS idx_studies_project ON studies(project_id);
 CREATE INDEX IF NOT EXISTS idx_studies_study_id ON studies(study_id);
+CREATE INDEX IF NOT EXISTS idx_studies_status ON studies(status);
 CREATE INDEX IF NOT EXISTS idx_pathogens_name ON pathogens(name);
 
 -- Create updated_at trigger function
@@ -88,6 +93,7 @@ SELECT
     p.organisation_id,
     p.user_id,
     p.privacy,
+    p.status,
     p.created_at,
     p.updated_at,
     p.deleted_at,
@@ -99,7 +105,7 @@ LEFT JOIN pathogens pat ON p.pathogen_id = pat.id AND pat.deleted_at IS NULL
 LEFT JOIN studies s ON p.id = s.project_id AND s.deleted_at IS NULL
 WHERE p.deleted_at IS NULL
 GROUP BY p.id, p.slug, p.name, p.description, p.organisation_id, 
-         p.user_id, p.privacy, p.created_at, p.updated_at, p.deleted_at,
+         p.user_id, p.privacy, p.status, p.created_at, p.updated_at, p.deleted_at,
          pat.name, pat.scientific_name;
 
 CREATE OR REPLACE VIEW study_details AS
@@ -110,6 +116,7 @@ SELECT
     s.description,
     s.start_date,
     s.end_date,
+    s.status,
     s.created_at,
     s.updated_at,
     s.deleted_at,

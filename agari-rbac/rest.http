@@ -28,51 +28,35 @@
 @viewer_username = viewer@org1.ac.za
 @viewer_password = pass123
 
-# ===== AUTHENTICATION TESTS =====
+# CHANGE THESE TO TEST DIFFERENT ROLES:
+# @username = {{system_admin_username}}
+# @password = {{system_admin_password}}
 
-### 1. Get token for System Admin
-# @name system_admin_login
+# @username = {{org_owner_username}}
+# @password = {{org_owner_password}}
+
+@username = {{org_admin_username}}
+@password = {{org_admin_password}}
+
+# @username = {{project_admin_username}}
+# @password = {{project_admin_password}}
+
+# @username = {{contributor_username}}
+# @password = {{contributor_password}}
+
+# @username = {{viewer_username}}
+# @password = {{viewer_password}}
+
+# ===== AUTHENTICATION =====
+
+### Get token for current user
+# @name login
 POST {{keycloak_host}}/realms/{{realm}}/protocol/openid-connect/token
 Content-Type: application/x-www-form-urlencoded
 
-grant_type=password&client_id={{client_id}}&client_secret={{client_secret}}&username={{system_admin_username}}&password={{system_admin_password}}
+grant_type=password&client_id={{client_id}}&client_secret={{client_secret}}&username={{username}}&password={{password}}
 
-### 2. Get token for Org Owner
-# @name org_owner_login
-POST {{keycloak_host}}/realms/{{realm}}/protocol/openid-connect/token
-Content-Type: application/x-www-form-urlencoded
-
-grant_type=password&client_id={{client_id}}&client_secret={{client_secret}}&username={{org_owner_username}}&password={{org_owner_password}}
-
-### 3. Get token for Org Admin
-# @name org_admin_login
-POST {{keycloak_host}}/realms/{{realm}}/protocol/openid-connect/token
-Content-Type: application/x-www-form-urlencoded
-
-grant_type=password&client_id={{client_id}}&client_secret={{client_secret}}&username={{org_admin_username}}&password={{org_admin_password}}
-
-### 4. Get token for Project Admin
-# @name project_admin_login
-POST {{keycloak_host}}/realms/{{realm}}/protocol/openid-connect/token
-Content-Type: application/x-www-form-urlencoded
-
-grant_type=password&client_id={{client_id}}&client_secret={{client_secret}}&username={{project_admin_username}}&password={{project_admin_password}}
-
-### 5. Get token for Contributor
-# @name contributor_login
-POST {{keycloak_host}}/realms/{{realm}}/protocol/openid-connect/token
-Content-Type: application/x-www-form-urlencoded
-
-grant_type=password&client_id={{client_id}}&client_secret={{client_secret}}&username={{contributor_username}}&password={{contributor_password}}
-
-### 6. Get token for Viewer
-# @name viewer_login
-POST {{keycloak_host}}/realms/{{realm}}/protocol/openid-connect/token
-Content-Type: application/x-www-form-urlencoded
-
-grant_type=password&client_id={{client_id}}&client_secret={{client_secret}}&username={{viewer_username}}&password={{viewer_password}}
-
-# ===== FOLIO API TESTS =====
+# ===== API TESTS =====
 
 ### Health Check (No auth required)
 GET {{folio_host}}/health
@@ -80,88 +64,64 @@ GET {{folio_host}}/health
 ### Get Permissions Matrix (No auth required)
 GET {{folio_host}}/permissions/matrix
 
-# ===== SYSTEM ADMIN TESTS =====
+### Get All Pathogens (No auth required)
+GET {{folio_host}}/pathogens
 
-### System Admin - Who Am I
+# ===== USER SPECIFIC TESTS =====
+
+### Who Am I?
 GET {{folio_host}}/auth/whoami
-Authorization: Bearer {{system_admin_login.response.body.access_token}}
+Authorization: Bearer {{login.response.body.access_token}}
 
-### System Admin - My Permissions
+### My Permissions
 GET {{folio_host}}/permissions/my-permissions
-Authorization: Bearer {{system_admin_login.response.body.access_token}}
+Authorization: Bearer {{login.response.body.access_token}}
 
-### System Admin - Can Create Pathogen? (Should be YES)
+### Can Create Pathogen?
 GET {{folio_host}}/permissions/check/create_pathogen
-Authorization: Bearer {{system_admin_login.response.body.access_token}}
+Authorization: Bearer {{login.response.body.access_token}}
 
-### System Admin - Can Create Project? (Should be YES)
+### Can Create Project?
 GET {{folio_host}}/permissions/check/create_project
-Authorization: Bearer {{system_admin_login.response.body.access_token}}
+Authorization: Bearer {{login.response.body.access_token}}
 
-### System Admin - Can Upload Data? (Should be YES)
+### Can Upload Data?
 GET {{folio_host}}/permissions/check/upload_data
-Authorization: Bearer {{system_admin_login.response.body.access_token}}
+Authorization: Bearer {{login.response.body.access_token}}
 
-# ===== ORG OWNER TESTS =====
-
-### Org Owner - Who Am I
-GET {{folio_host}}/auth/whoami
-Authorization: Bearer {{org_owner_login.response.body.access_token}}
-
-### Org Owner - Can Create Pathogen? (Should be NO)
-GET {{folio_host}}/permissions/check/create_pathogen
-Authorization: Bearer {{org_owner_login.response.body.access_token}}
-
-### Org Owner - Can Create Project? (Should be YES)
-GET {{folio_host}}/permissions/check/create_project
-Authorization: Bearer {{org_owner_login.response.body.access_token}}
-
-### Org Owner - Can Manage Organisation Settings? (Should be YES)
+### Can Manage Organisation Settings?
 GET {{folio_host}}/permissions/check/manage_organisation_settings
-Authorization: Bearer {{org_owner_login.response.body.access_token}}
+Authorization: Bearer {{login.response.body.access_token}}
 
-# ===== CONTRIBUTOR TESTS =====
-
-### Contributor - Who Am I
-GET {{folio_host}}/auth/whoami
-Authorization: Bearer {{contributor_login.response.body.access_token}}
-
-### Contributor - Can Upload Data? (Should be YES)
-GET {{folio_host}}/permissions/check/upload_data
-Authorization: Bearer {{contributor_login.response.body.access_token}}
-
-### Contributor - Can Create Project? (Should be NO)
-GET {{folio_host}}/permissions/check/create_project
-Authorization: Bearer {{contributor_login.response.body.access_token}}
-
-### Contributor - Can View Published Data? (Should be YES)
+### Can View Published Data?
 GET {{folio_host}}/permissions/check/view_published_sample_data
-Authorization: Bearer {{contributor_login.response.body.access_token}}
+Authorization: Bearer {{login.response.body.access_token}}
 
-# ===== VIEWER TESTS =====
+# ===== PATHOGENS =====
 
-### Viewer - Who Am I
-GET {{folio_host}}/auth/whoami
-Authorization: Bearer {{viewer_login.response.body.access_token}}
+### Try to Create a Pathogen
+POST {{folio_host}}/pathogens
+Authorization: Bearer {{login.response.body.access_token}}
+Content-Type: application/json
 
-### Viewer - Can View Published Data? (Should be YES)
-GET {{folio_host}}/permissions/check/view_published_sample_data
-Authorization: Bearer {{viewer_login.response.body.access_token}}
+{
+    "name": "Test Pathogen",
+    "scientific_name": "Testicus pathogenicus",
+    "description": "A test pathogen - will succeed if user has create_pathogen permission"
+}
 
-### Viewer - Can Upload Data? (Should be NO)
-GET {{folio_host}}/permissions/check/upload_data
-Authorization: Bearer {{viewer_login.response.body.access_token}}
+### Update Pathogen (replace PATHOGEN_ID with actual ID)
+PUT {{folio_host}}/pathogens/1c2a2d89-6dad-4b1c-887e-5c7740a22853
+Authorization: Bearer {{login.response.body.access_token}}
+Content-Type: application/json
 
-### Viewer - Can Create Project? (Should be NO)
-GET {{folio_host}}/permissions/check/create_project
-Authorization: Bearer {{viewer_login.response.body.access_token}}
+{
+    "name": "Updated Test Pathogen",
+    "description": "Updated description"
+}
 
-# ===== CROSS-USER COMPARISON =====
+### Delete Pathogen (replace PATHOGEN_ID with actual ID)
+DELETE {{folio_host}}/pathogens/1c2a2d89-6dad-4b1c-887e-5c7740a22853
+Authorization: Bearer {{login.response.body.access_token}}
 
-### Compare permissions: System Admin vs Viewer
-GET {{folio_host}}/permissions/my-permissions
-Authorization: Bearer {{system_admin_login.response.body.access_token}}
 
-###
-GET {{folio_host}}/permissions/my-permissions
-Authorization: Bearer {{viewer_login.response.body.access_token}}
