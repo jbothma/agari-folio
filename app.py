@@ -1094,8 +1094,8 @@ class StudyList(Resource):
                 return {'error': f'Study with name "{name}" already exists'}, 409
             return {'error': f'Database error: {str(e)}'}, 500
 
-@study_ns.route('/submit/<string:study_id>')
-class StudySubmit(Resource):
+@study_ns.route('/submit/<string:study_id>/')
+class SongSubmit(Resource):
     
     ### POST /studies/submit/<study_id> ###
 
@@ -1103,50 +1103,222 @@ class StudySubmit(Resource):
     @require_auth(keycloak_auth)
     def post(self, study_id):
 
-        """Submit a study to SONG"""
-
+        """Submit an analysis to SONG (proxy endpoint)"""
+        
         try:
-            with get_db_cursor() as cursor:
-                cursor.execute("""
-                    SELECT * 
-                    FROM studies 
-                    WHERE study_id = %s AND deleted_at IS NULL
-                """, (study_id,))
-                
-                study = cursor.fetchone()
-                
-                if not study:
-                    return {'error': 'Study not found or already deleted'}, 404
+            # Get the JSON payload from the request
+            data = request.get_json()
+            if not data:
+                return {'error': 'No JSON data provided'}, 400
 
-            print(f"Submitting studyId '{study_id}' to SONG...")
-
+            # Get client token for SONG API
             song_token = keycloak_auth.get_client_token()
             if not song_token:
                 return {'error': 'Failed to authenticate with SONG service'}, 500
-            else:
-                print("Successfully obtained SONG token")
-                print(f"SONG Token: {song_token}")
 
+            # Set up headers for SONG request
             song_headers = {
                 'Authorization': f'Bearer {song_token}',
                 'Content-Type': 'application/json'
             }
             
-            song_submit_url = f"{song}/studies/{study_id}/submit"
-            song_response = requests.post(song_submit_url, headers=song_headers)
+            # Forward the request to SONG
+            song_submit_url = f"{song}/submit/{study_id}/"
+            song_response = requests.post(song_submit_url, headers=song_headers, json=data)
 
-            print(f"SONG Submission Response: {song_response.json()}")
-
-            if song_response.status_code == 200:
-                return {
-                    'message': f'Study "{study_id}" submitted to SONG successfully',
-                    'song_response': song_response.json()
-                }, 200
-            else:
-                return {'error': f'Failed to submit study to SONG: {song_response.status_code} - {song_response.text}'}, 500
+            print(f"SONG submit response status: {song_response.status_code}")
+            
+            # Forward SONG's response directly
+            try:
+                response_data = song_response.json()
+            except:
+                response_data = {'message': song_response.text}
+            
+            return response_data, song_response.status_code
 
         except Exception as e:
-            return {'error': f'Error submitting study to SONG: {str(e)}'}, 500
+            return {'error': f'Failed to submit analysis: {str(e)}'}, 500
+        
+@study_ns.route('/<string:study_id>/analysis')
+class StudyAnalysis(Resource):
+    
+    ### GET /studies/<study_id>/analysis ###
+
+    @study_ns.doc('get_study_analysis')
+    @require_auth(keycloak_auth)
+    def get(self, study_id):
+
+        """
+            Get analysis results for a study from SONG (proxy endpoint)
+
+            Query Parameters:
+                - analysisStates: Comma-separated list of analysis states to filter by
+        """
+
+        states = request.args.get('analysisStates')
+        
+        try:
+            # Get client token for SONG API
+            song_token = keycloak_auth.get_client_token()
+            if not song_token:
+                return {'error': 'Failed to authenticate with SONG service'}, 500
+
+            # Set up headers for SONG request
+            song_headers = {
+                'Authorization': f'Bearer {song_token}',
+                'Content-Type': 'application/json'
+            }
+
+            if states:
+                song_analysis_url = f"{song}/studies/{study_id}/analysis?analysisStates={states}"
+            else:
+                song_analysis_url = f"{song}/studies/{study_id}/analysis"
+
+            song_response = requests.get(song_analysis_url, headers=song_headers)
+
+            print(f"SONG analysis response status: {song_response.status_code}")
+            
+            # Forward SONG's response directly
+            try:
+                response_data = song_response.json()
+            except:
+                response_data = {'message': song_response.text}
+            
+            return response_data, song_response.status_code
+
+        except Exception as e:
+            return {'error': f'Failed to retrieve analysis results: {str(e)}'}, 500
+
+@study_ns.route('/<string:study_id>/analysis/<string:analysis_id>/upload')
+class StudyAnalysisUpload(Resource):
+    
+    ### POST /studies/<study_id>/analysis/<analysis_id>/upload ###
+
+    @study_ns.doc('upload_analysis_file')
+    @require_auth(keycloak_auth)
+    def post(self, study_id, analysis_id):
+
+        """Upload a file to an analysis in SCORE and MINIO (proxy endpoint)"""
+
+        try:
+            # Parse form data
+            object_id = request.form.get('object_id')
+            overwrite = request.form.get('overwrite', 'true').lower() == 'true'
+            
+            if not object_id:
+                return {'error': 'object_id is required'}, 400
+                
+            # Get the uploaded file
+            if 'file' not in request.files:
+                return {'error': 'No file provided'}, 400
+                
+            file = request.files['file']
+            if file.filename == '':
+                return {'error': 'No file selected'}, 400
+
+            # Read file data and calculate size/MD5
+            file_data = file.read()
+            file_size = len(file_data)
+            
+            import hashlib
+            file_md5 = hashlib.md5(file_data).hexdigest()
+            
+            print(f"File: {file.filename}, Size: {file_size}, MD5: {file_md5}")
+
+            # Get client token for SCORE API
+            score_token = keycloak_auth.get_client_token()
+            if not score_token:
+                return {'error': 'Failed to authenticate with SCORE service'}, 500
+
+            score_headers = {
+                'Authorization': f'Bearer {score_token}',
+                'Content-Type': 'application/x-www-form-urlencoded'
+            }
+
+            # Step 1: Initialize upload with SCORE
+            init_upload_url = f"{score}/upload/{object_id}/uploads"
+            init_data = {
+                'fileSize': file_size,
+                'md5': file_md5,
+                'overwrite': overwrite
+            }
+            
+            init_response = requests.post(init_upload_url, headers=score_headers, data=init_data)
+            if init_response.status_code != 200:
+                return {'error': f'Failed to initialize upload: {init_response.status_code} - {init_response.text}'}, 500
+                
+            init_result = init_response.json()
+            upload_id = init_result['uploadId']
+            presigned_url = init_result['parts'][0]['url']
+            object_md5 = init_result['objectMd5']
+            
+            print(f"Upload initialized - Upload ID: {upload_id}")
+
+            # Step 2: Upload file to MinIO using presigned URL
+            upload_headers = {'Content-Type': 'text/plain'}
+            upload_response = requests.put(presigned_url, headers=upload_headers, data=file_data)
+            
+            if upload_response.status_code != 200:
+                return {'error': f'Failed to upload file to storage: {upload_response.status_code}'}, 500
+                
+            etag = upload_response.headers.get('ETag', '').strip('"')
+            print(f"File uploaded to MinIO - ETag: {etag}")
+
+            # Step 3: Finalize part upload
+            finalize_part_url = f"{score}/upload/{object_id}/parts"
+            finalize_part_params = {
+                'partNumber': 1,
+                'etag': etag,
+                'md5': object_md5,
+                'uploadId': upload_id
+            }
+            
+            score_json_headers = {
+                'Authorization': f'Bearer {score_token}',
+                'Content-Type': 'application/json'
+            }
+            
+            finalize_part_response = requests.post(
+                finalize_part_url, 
+                headers=score_json_headers, 
+                params=finalize_part_params
+            )
+            
+            if finalize_part_response.status_code != 200:
+                return {'error': f'Failed to finalize part upload: {finalize_part_response.status_code}'}, 500
+                
+            print("Part upload finalized")
+
+            # Step 4: Finalize complete upload
+            finalize_upload_url = f"{score}/upload/{object_id}"
+            finalize_upload_params = {'uploadId': upload_id}
+            
+            finalize_upload_response = requests.post(
+                finalize_upload_url, 
+                headers=score_json_headers, 
+                params=finalize_upload_params
+            )
+            
+            if finalize_upload_response.status_code != 200:
+                return {'error': f'Failed to finalize upload: {finalize_upload_response.status_code}'}, 500
+                
+            print("Upload finalized successfully")
+
+            return {
+                'message': 'File uploaded successfully',
+                'study_id': study_id,
+                'analysis_id': analysis_id,
+                'object_id': object_id,
+                'filename': file.filename,
+                'file_size': file_size,
+                'md5': file_md5,
+                'upload_id': upload_id,
+                'etag': etag
+            }, 200
+
+        except Exception as e:
+            return {'error': f'Failed to upload file: {str(e)}'}, 500
+       
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

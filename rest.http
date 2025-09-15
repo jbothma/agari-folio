@@ -238,7 +238,7 @@ Authorization: Bearer {{token}}
 
 ###
 
-@study_id = study-002
+@study_id = study-001
 
 # @name create_study
 POST {{folio}}/studies
@@ -271,82 +271,86 @@ Authorization: Bearer {{token}}
 
 ###
 
+# @name submitAnalysis
+POST {{folio}}/studies/submit/{{study_id}}/
+Authorization: Bearer {{token}}
+Content-Type: application/json
 
-# ### 3.1c. GET STUDY ANALYSES
-# GET http://song.local/studies/{{study_id}}/analysis
-# Authorization: Bearer {{token}}
+{
+  "studyId": "study-001",
+  "analysisId": "analysis001",
+  "analysisType": {
+    "name": "sequencingRead",
+    "version": 1
+  },
+  "samples": [
+    {
+      "sampleId": "SA001",
+      "submitterSampleId": "SA001",
+      "sampleType": "Total DNA",
+      "matchedNormalSubmitterSampleId": null,
+      "specimen": {
+        "specimenId": "SP001", 
+        "submitterSpecimenId": "SP001",
+        "specimenType": "Normal",
+        "specimenTissueSource": "Blood derived",
+        "tumourNormalDesignation": "Normal"
+      },
+      "donor": {
+        "studyId": "study-001",
+        "donorId": "D001",
+        "submitterDonorId": "D001",
+        "gender": "Female"
+      }
+    }
+  ],
+  "files": [
+    {
+      "fileName": "test_data.fasta",
+      "fileType": "FASTA",
+      "fileSize": 298,
+      "fileMd5sum": "cc70b8e811b39c98a938edf87145e34d",
+      "fileAccess": "open",
+      "dataType": "Sequencing Reads"
+    }
+  ],
+  "experiment": {
+    "libraryStrategy": "WGS",
+    "pairedEnd": false,
+    "aligned": false
+  }
+}
+
+###
+
+@analysis_id = 6920dac0-52c5-42be-a0da-c052c542be33
+
+# @name get_study_analyses_by_id
+GET http://song.local/studies/{{study_id}}/analysis/{{analysis_id}}
+Authorization: Bearer {{token}}
+
+###
+
+# @name list_study_analyses
+GET http://song.local/studies/{{study_id}}/analysis?analysisStates=PUBLISHED,UNPUBLISHED
+Authorization: Bearer {{token}}
+
+###
+
+@object_id_from_analysis = baa3143a-4d69-5d4a-975f-b0ae20216a91
+
+# @name upload_analysis_file
+POST {{folio}}/studies/{{study_id}}/analysis/{{analysis_id}}/upload
+Content-Type: multipart/form-data
+Authorization: Bearer {{token}}
+
+object_id=baa3143a-4d69-5d4a-975f-b0ae20216a91
+overwrite=true
+file=< ./test/test_data.fasta
 
 
 
-# ### 3.2a. SUBMIT ANALYSIS
-# # @name submitAnalysis
-# POST http://song.local/submit/{{study_id}}/
-# Authorization: Bearer {{token}}
-# Content-Type: application/json
 
-# < ./data/analysis_submission.json
-
-# ### 3.2b. GET ANALYSIS DETAILS
-# # Extract analysis_id from step 4 response and get full analysis details
-# @submitted_analysis_id = {{submitAnalysis.response.body.analysisId}}
-# # @submitted_analysis_id = 759d93b7-3615-436a-9d93-b73615e36a12
-# # @name getAnalysis
-# GET http://song.local/studies/{{study_id}}/analysis/{{submitted_analysis_id}}
-# Authorization: Bearer {{token}}
-
-# ### === SCORE SERVICE ===
-
-# ### 4.1a. INITIALIZE SCORE UPLOAD
-# # Extract object_id from step 5 response
-# @object_id = {{getAnalysis.response.body.files[0].objectId}}
-# # @name initUpload
-# POST http://score.local/upload/{{object_id}}/uploads
-# Authorization: Bearer {{token}}
-# Content-Type: application/x-www-form-urlencoded
-
-# fileSize={{test_file_size}}
-# &md5={{test_file_md5}}
-# &overwrite=true
-
-# ###
-# @upload_id = {{initUpload.response.body.uploadId}}
-# @presigned_url = {{initUpload.response.body.parts.0.url}}
-
-# @md5 = {{initUpload.response.body.objectMd5}}
-
-# ### 4.1b. UPLOAD FILE TO MINIO
-# # Using hosts file entry: 127.0.0.1 minio (with port-forward to MinIO)
-# # @name uploadFile
-# PUT {{presigned_url}}
-# Content-Type: text/plain
-
-# < ./data/{{test_file_name}}
-
-# ###
-# # @etag = {{uploadFile.response.headers.ETag}}
-# @etag = a1421b18d7859ad811877b981fedca4f
-# # Debug variables before step 8a
-# @debug_object_id = {{object_id}}
-# @debug_etag = {{etag}}
-# # @etag_stripped = {{etag.replace('"', '')}}
-# @debug_md5 = {{md5}}
-# @debug_upload_id = {{upload_id}}
-
-# ### 4.1c. Finalise Part Upload
-# # @name finalizePartUpload
-# POST http://score.local/upload/{{object_id}}/parts?partNumber=1&etag={{etag}}&md5={{md5}}&uploadId={{upload_id}}
-# Authorization: Bearer {{token}}
-# Content-Type: application/json
-
-# ### 4.1d. Finalize upload
-# # @name finalizeUpload
-# POST http://score.local/upload/{{object_id}}?uploadId={{upload_id}}
-# Authorization: Bearer {{token}}
-# Content-Type: application/json
-
-# @analysis_id = adb67a21-c89c-49c5-b67a-21c89c29c511
-
-# ### === SONG SERVICE ===
 
 # ### 5.1a. PUBLISH ANALYSIS 
 # PUT http://song.local/studies/{{study_id}}/analysis/publish/{{analysis_id}}
