@@ -1,736 +1,657 @@
-"""
-Authentication and Authorization Module for Folio API
-
-This module contains all JWT authentication, Keycloak integration,
-and authorization functions.
-"""
-
-import logging
-import requests
-import os
 import jwt
+import requests
 from functools import wraps
-from flask import request, jsonify, g
-import traceback
+from flask import request, jsonify
+from jwt.exceptions import InvalidTokenError, ExpiredSignatureError
 
-logger = logging.getLogger(__name__)
-
-# Keycloak configuration from environment variables
-KEYCLOAK_HOST = os.getenv("KEYCLOAK_HOST", "http://keycloak:8080")
-KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "agari")
-KEYCLOAK_ISSUER = os.getenv("KEYCLOAK_ISSUER", f"{KEYCLOAK_HOST}/realms/{KEYCLOAK_REALM}")
-KEYCLOAK_CLIENT_ID = os.getenv("KEYCLOAK_CLIENT_ID", "dms")
-KEYCLOAK_CLIENT_SECRET = os.getenv("KEYCLOAK_CLIENT_SECRET", "")
-KEYCLOAK_PERMISSION_URI = f"{KEYCLOAK_HOST}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/token"
-
-# Keycloak Admin API endpoints
-KEYCLOAK_ADMIN_TOKEN_URI = f"{KEYCLOAK_HOST}/realms/master/protocol/openid-connect/token"
-KEYCLOAK_ADMIN_BASE_URI = f"{KEYCLOAK_HOST}/admin/realms/{KEYCLOAK_REALM}"
-KEYCLOAK_ADMIN_CLIENT_ID = "admin-cli"
-
-# UMA Resource Server endpoints
-KEYCLOAK_UMA_RESOURCE_URI = f"{KEYCLOAK_HOST}/realms/{KEYCLOAK_REALM}/authz/protection/resource_set"
-
-
-def get_service_token():
-    """Get a service token from Keycloak for admin operations"""
-    try:
-        logger.info("Getting service token from Keycloak")
+class KeycloakAuth:
+    def __init__(self, keycloak_url, realm, client_id, client_secret):
+        self.keycloak_url = keycloak_url
+        self.realm = realm
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.public_key = None
         
-        headers = {
-            'Content-Type': 'application/x-www-form-urlencoded'
-        }
-        
-        # Request service token with SONG and SCORE scopes
-        data = {
-            'grant_type': 'client_credentials',
-            'client_id': KEYCLOAK_CLIENT_ID,
-            'client_secret': KEYCLOAK_CLIENT_SECRET,
-            'scope': 'song.READ song.WRITE score.READ score.WRITE'
-        }
-        
-        response = requests.post(KEYCLOAK_PERMISSION_URI, headers=headers, data=data, timeout=10)
-        response.raise_for_status()
-        
-        token_data = response.json()
-        logger.info(f"Service token response: {token_data}")
-        access_token = token_data.get('access_token')
-        scope = token_data.get('scope', 'no scope returned')
-        logger.info(f"Service token scope: {scope}")
-        
-        if access_token:
-            logger.info("Successfully obtained service token")
-            return access_token
-        else:
-            logger.error("No access token in response")
-            return None
-            
-    except Exception as e:
-        logger.error(f"Failed to get service token: {e}")
-        return None
-
-
-def get_dms_client_token():
-    """Get client credentials token for DMS client (service-to-service auth)"""
-    try:
-        logger.info("=== Getting DMS client credentials token for resource management ===")
-        data = {
-            'grant_type': 'client_credentials',
-            'client_id': KEYCLOAK_CLIENT_ID,  # Use DMS client
-            'client_secret': KEYCLOAK_CLIENT_SECRET,  # Use DMS client secret
-        }
-        
-        response = requests.post(KEYCLOAK_PERMISSION_URI, data=data, timeout=10)
-        response.raise_for_status()
-        
-        token_data = response.json()
-        logger.info(f"Got DMS client credentials token for resource management")
-        return token_data.get('access_token')
-        
-    except Exception as e:
-        logger.error(f"Failed to get DMS client credentials token: {e}")
-        return None
-
-
-def get_dms_client_id():
-    """Get the internal client ID for the DMS client"""
-    try:
-        service_token = get_service_token()
-        if not service_token:
-            return None
-            
-        headers = {
-            'Authorization': f'Bearer {service_token}',
-            'Content-Type': 'application/json'
-        }
-        
-        # Try to get all clients and find DMS - this may fail due to permissions
-        response = requests.get(f"{KEYCLOAK_ADMIN_BASE_URI}/clients", headers=headers, timeout=10)
-        
-        if response.status_code == 403:
-            logger.warning("Service account doesn't have admin permissions to list clients")
-            logger.info("Need to grant realm-admin role to service-account-dms or use alternative approach")
-            return None
-            
-        response.raise_for_status()
-        
-        clients = response.json()
-        for client in clients:
-            if client.get('clientId') == KEYCLOAK_CLIENT_ID:
-                return client.get('id')
-        
-        logger.error(f"DMS client '{KEYCLOAK_CLIENT_ID}' not found")
-        return None
-        
-    except Exception as e:
-        logger.error(f"Failed to get DMS client ID: {e}")
-        return None
-
-
-def get_user_by_username(username):
-    """Get user details by username from Keycloak"""
-    try:
-        service_token = get_service_token()
-        if not service_token:
-            return None
-        
-        headers = {
-            'Authorization': f'Bearer {service_token}',
-            'Content-Type': 'application/json'
-        }
-        
-        # Search for user by username
-        response = requests.get(f"{KEYCLOAK_ADMIN_BASE_URI}/users", 
-                              headers=headers, 
-                              params={'username': username, 'exact': 'true'}, 
-                              timeout=10)
-        response.raise_for_status()
-        
-        users = response.json()
-        if users:
-            user = users[0]  # Get first (and should be only) exact match
-            logger.info(f"Found user '{username}' with ID: {user.get('id')}")
-            return user
-        else:
-            logger.warning(f"User '{username}' not found")
-            return None
-        
-    except Exception as e:
-        logger.error(f"Failed to get user by username: {e}")
-        return None
-
-
-def get_project_group_by_name(group_name):
-    """Get a project or study group by its exact name using Keycloak search API"""
-    try:
-        service_token = get_service_token()
-        if not service_token:
-            return None
-        
-        headers = {
-            'Authorization': f'Bearer {service_token}',
-            'Content-Type': 'application/json'
-        }
-        
-        # Search for the group by name
-        response = requests.get(f"{KEYCLOAK_ADMIN_BASE_URI}/groups?search={group_name}", 
-                              headers=headers, timeout=10)
-        response.raise_for_status()
-        
-        groups = response.json()
-        
-        # Find exact match
-        for group in groups:
-            if group.get('name') == group_name:
-                logger.info(f"Found group '{group_name}' with ID: {group['id']}")
-                return group
-        
-        logger.warning(f"Group '{group_name}' not found")
-        return None
-        
-    except Exception as e:
-        logger.error(f"Failed to get group by name '{group_name}': {e}")
-        return None
-
-
-def get_rpt_permissions(access_token):
-    """Exchange JWT access token for RPT permissions (Following SONG's pattern)"""
-    try:
-        logger.info("=== FETCHING RPT PERMISSIONS ===")
-        
-        # Prepare UMA token exchange request (like SONG does)
-        headers = {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Authorization': f'Bearer {access_token}'
-        }
-        
-        data = {
-            'grant_type': 'urn:ietf:params:oauth:grant-type:uma-ticket',
-            'audience': KEYCLOAK_CLIENT_ID,
-            'response_mode': 'permissions'
-        }
-        
-        logger.info(f"Exchanging JWT for RPT permissions at: {KEYCLOAK_PERMISSION_URI}")
-        response = requests.post(KEYCLOAK_PERMISSION_URI, headers=headers, data=data, timeout=10)
-        
-        if response.status_code in [200, 207]:
-            permissions = response.json()
-            logger.info(f"RPT permissions response: {permissions}")
-            return permissions
-        elif response.status_code == 403:
-            # 403 means token is valid but user has no permissions - this is expected for non-admin users
-            logger.info(f"User has valid token but no UMA permissions (403 response)")
-            return []
-        elif response.status_code == 401:
-            # 401 means invalid token - authentication failure
-            logger.error(f"Invalid token for RPT permissions: {response.status_code} - {response.text}")
-            return False
-        else:
-            # Other errors (400, 500, etc.) - treat as authentication failure
-            logger.error(f"Failed to get RPT permissions: {response.status_code} - {response.text}")
-            return False
-            
-    except Exception as e:
-        logger.error(f"Failed to fetch RPT permissions: {e}")
-        return False
-
-
-def extract_scopes_from_rpt(permissions):
-    """Extract scopes from RPT permissions (Following SONG's extractGrantedScopesFromRpt pattern)"""
-    granted_scopes = set()
-    
-    for permission in permissions:
-        rsname = permission.get('rsname', '')
-        scopes = permission.get('scopes', [])
-        
-        for scope in scopes:
-            granted_scopes.add(f"{rsname}.{scope}")
-    
-    logger.info(f"Extracted scopes from RPT: {granted_scopes}")
-    return granted_scopes
-
-
-def validate_jwt_token(token):
-    """Validate JWT token by exchanging it for RPT permissions (Following SONG's pattern)"""
-    try:
-        logger.info("=== Starting JWT validation via RPT exchange ===")
-        
-        # Skip local JWT validation - let Keycloak validate it!
-        # Just extract basic info without validation for logging
+    def get_public_key(self):
+        """Fetch public key from Keycloak for token verification"""
         try:
-            payload = jwt.decode(token, options={"verify_signature": False})
-            logger.info(f"Token from user: {payload.get('preferred_username', 'unknown')}")
-        except:
-            logger.info("Could not decode token for logging")
-            payload = {}
-        
-        # The real validation: try to get RPT permissions from Keycloak
-        # This validates both token authenticity AND authorization
-        rpt_permissions = get_rpt_permissions(token)
-        granted_scopes = extract_scopes_from_rpt(rpt_permissions)
-        
-        # CRITICAL SECURITY FIX: Check if RPT request failed
-        # If get_rpt_permissions returned False (error) or empty list due to 
-        # authorization failure, we should treat this as authentication failure
-        if rpt_permissions is False:
-            logger.error("RPT permissions request failed - treating as invalid token")
+            certs_url = f"{self.keycloak_url}/realms/{self.realm}/protocol/openid_connect/certs"
+            response = requests.get(certs_url)
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as e:
+            print(f"Error fetching public key: {e}")
             return None
+    
+    def verify_token(self, token):
+        """Extract user info from JWT token without signature verification"""
+        try:
+            # Decode token without signature verification for internal services
+            payload = jwt.decode(token, options={"verify_signature": False})
+            return payload
+            
+        except Exception as e:
+            return {'error': f'Token decode failed: {str(e)}'}
+    
+    def get_admin_token(self):
+        """Get admin access token for Keycloak API calls using service account"""
+        try:
+            token_url = f"{self.keycloak_url}/realms/{self.realm}/protocol/openid-connect/token"
+            
+            data = {
+                'grant_type': 'client_credentials',
+                'client_id': self.client_id,
+                'client_secret': self.client_secret
+            }
+            
+            response = requests.post(token_url, data=data)
+            response.raise_for_status()
+            token_data = response.json()
+            return token_data.get('access_token')
+        except requests.RequestException as e:
+            print(f"Error getting admin token: {e}")
+            return None
+    
+    def get_users_by_attribute(self, attribute_name, attribute_value, exact_match=True):
+        """
+        Search for users by a specific attribute
         
-        # IMPORTANT: For UMA with ENFORCING mode, empty permissions list might be valid
-        # (user authenticated but has no permissions). This is different from request failure.
-        # The require_permissions decorator will handle empty permissions appropriately.
+        Args:
+            attribute_name (str): The name of the attribute to search for
+            attribute_value (str): The value to search for
+            exact_match (bool): If True, search for exact match; if False, search for partial match
+            
+        Returns:
+            list: List of users with simplified format (user_id, username, organisation_id, roles, attributes)
+        """
+        admin_token = self.get_admin_token()
+        if not admin_token:
+            return []
         
-        # Return validated payload with RPT permissions
+        try:
+            # Keycloak admin API endpoint for users
+            users_url = f"{self.keycloak_url}/admin/realms/{self.realm}/users"
+            
+            headers = {
+                'Authorization': f'Bearer {admin_token}',
+                'Content-Type': 'application/json'
+            }
+            
+            # For custom attributes, we need to get all users and filter client-side
+            # as Keycloak's search doesn't handle custom attributes well
+            params = {'max': 1000}
+            
+            response = requests.get(users_url, headers=headers, params=params)
+            response.raise_for_status()
+            
+            users = response.json()
+            
+            # Filter users based on attribute
+            filtered_users = []
+            for user in users:
+                if self._user_has_attribute_value(user, attribute_name, attribute_value, exact_match):
+                    # Format user data similar to whoami response
+                    user_data = self._format_user_data(user)
+                    filtered_users.append(user_data)
+            
+            return filtered_users
+            
+        except requests.RequestException as e:
+            print(f"Error searching users by attribute: {e}")
+            return []
+    
+    def _user_has_attribute_value(self, user, attribute_name, attribute_value, exact_match=True):
+        """
+        Check if a user has a specific attribute value (supports comma-separated values)
+        
+        Args:
+            user (dict): User object from Keycloak
+            attribute_name (str): The name of the attribute to check
+            attribute_value (str): The value to search for
+            exact_match (bool): If True, search for exact match; if False, search for partial match
+            
+        Returns:
+            bool: True if user has the attribute value, False otherwise
+        """
+        user_attributes = user.get('attributes', {})
+        
+        if attribute_name not in user_attributes:
+            return False
+        
+        attr_values = user_attributes[attribute_name]
+        
+        # Attributes are stored as lists in Keycloak
+        if isinstance(attr_values, list):
+            for attr_val in attr_values:
+                if self._check_attribute_value(str(attr_val), attribute_value, exact_match):
+                    return True
+        else:
+            return self._check_attribute_value(str(attr_values), attribute_value, exact_match)
+        
+        return False
+    
+    def _check_attribute_value(self, attr_val, search_value, exact_match=True):
+        """
+        Check if an attribute value matches the search value (supports comma-separated values)
+        
+        Args:
+            attr_val (str): The attribute value to check
+            search_value (str): The value to search for
+            exact_match (bool): If True, search for exact match; if False, search for partial match
+            
+        Returns:
+            bool: True if there's a match, False otherwise
+        """
+        # Check if attribute value contains comma-separated values
+        if ',' in attr_val:
+            individual_values = [v.strip() for v in attr_val.split(',')]
+            if exact_match:
+                return search_value in individual_values
+            else:
+                return any(search_value.lower() in v.lower() for v in individual_values)
+        else:
+            # Single value check
+            if exact_match:
+                return search_value == attr_val
+            else:
+                return search_value.lower() in attr_val.lower()
+    
+    def _format_user_data(self, user):
+        """
+        Format user data similar to whoami response
+        
+        Args:
+            user (dict): User object from Keycloak
+            
+        Returns:
+            dict: Formatted user data with user_id, username, organisation_id, roles, attributes
+        """
+        # Extract custom attributes (excluding standard ones)
+        user_attributes = {}
+        attributes = user.get('attributes', {})
+        
+        for key, value in attributes.items():
+            if key != 'organisation_id':  # organisation_id is handled separately
+                user_attributes[key] = value
+        
         return {
-            'granted_scopes': granted_scopes,
-            'rpt_permissions': rpt_permissions,
-            'preferred_username': payload.get('preferred_username', 'unknown'),
-            'email': payload.get('email'),
-            'name': payload.get('name'),
-            'sub': payload.get('sub'),
-            'iss': payload.get('iss'),
-            'azp': payload.get('azp', payload.get('aud')),
+            'user_id': user.get('id'),
+            'username': user.get('username'),
+            'email': user.get('email'),
+            'organisation_id': attributes.get('organisation_id', [None])[0] if attributes.get('organisation_id') else None,
+            'roles': [],  # Roles would need to be fetched separately if needed
+            'attributes': user_attributes,
+            'is_authenticated': True,
         }
+    
+    def user_has_attribute(self, user_id, attribute_name, attribute_value, exact_match=True):
+        """
+        Check if a specific user has an attribute with a given value
         
-    except Exception as e:
-        logger.error(f"JWT validation failed: {e}")
-        return None
-
-
-def extract_user_info(payload):
-    """Extract user information and RPT permissions from JWT payload"""
-    
-    # Extract user information
-    user_info = {
-        "username": payload.get("preferred_username", "unknown"),
-        "preferred_username": payload.get("preferred_username", "unknown"),
-        "email": payload.get("email"),
-        "name": payload.get("name"),
-        "sub": payload.get("sub"),
-        "iss": payload.get("iss"),
-        "client_id": payload.get("azp", payload.get("aud")),
-    }
-    
-    # Get RPT-based permissions
-    granted_scopes = payload.get('granted_scopes', set())
-    rpt_permissions = payload.get('rpt_permissions', [])
-    
-    # Convert to list for JSON serialization
-    user_info["permissions"] = list(granted_scopes)
-    user_info["rpt_permissions"] = rpt_permissions
-    
-    # Extract folio-specific permissions
-    folio_permissions = [scope for scope in granted_scopes if scope.startswith('folio.')]
-    user_info["folio_permissions"] = folio_permissions
-    
-    logger.info(f"User {user_info['username']} has RPT permissions: {folio_permissions}")
-    
-    return user_info
-
-
-def authenticate_token(f):
-    """Decorator to require valid JWT token"""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        auth_header = request.headers.get('Authorization')
-        if not auth_header or not auth_header.startswith('Bearer '):
-            return jsonify({'error': 'Missing or invalid Authorization header'}), 401
-
-        token = auth_header.split(' ')[1]
-        payload = validate_jwt_token(token)
+        Args:
+            user_id (str): The user ID to check
+            attribute_name (str): The name of the attribute to check
+            attribute_value (str): The value to search for
+            exact_match (bool): If True, search for exact match; if False, search for partial match
+            
+        Returns:
+            bool: True if user has the attribute value, False otherwise
+        """
+        admin_token = self.get_admin_token()
+        if not admin_token:
+            return False
         
-        if payload is None:
-            return jsonify({'error': 'Invalid token'}), 401
-
-        # Store user info in Flask's g object for access in the route
-        g.user = extract_user_info(payload)
-        g.token = token
-        
-        return f(*args, **kwargs)
+        try:
+            # Get specific user by ID
+            user_url = f"{self.keycloak_url}/admin/realms/{self.realm}/users/{user_id}"
+            
+            headers = {
+                'Authorization': f'Bearer {admin_token}',
+                'Content-Type': 'application/json'
+            }
+            
+            response = requests.get(user_url, headers=headers)
+            response.raise_for_status()
+            
+            user = response.json()
+            return self._user_has_attribute_value(user, attribute_name, attribute_value, exact_match)
+            
+        except requests.RequestException as e:
+            print(f"Error checking user attribute: {e}")
+            return False
     
-    return decorated_function
+    def get_users_by_organization(self, organization_id):
+        """
+        Get all users belonging to a specific organization
+        
+        Args:
+            organization_id (str): The organization ID to search for
+            
+        Returns:
+            list: List of users in the organization
+        """
+        return self.get_users_by_attribute('organisation_id', organization_id)
+    
+    def get_users_by_role(self, role_name):
+        """
+        Get all users with a specific role
+        
+        Args:
+            role_name (str): The role name to search for
+            
+        Returns:
+            list: List of users with simplified format (user_id, username, organisation_id, roles, attributes)
+        """
+        admin_token = self.get_admin_token()
+        if not admin_token:
+            return []
+        
+        try:
+            # Get role members endpoint
+            role_users_url = f"{self.keycloak_url}/admin/realms/{self.realm}/roles/{role_name}/users"
+            
+            headers = {
+                'Authorization': f'Bearer {admin_token}',
+                'Content-Type': 'application/json'
+            }
+            
+            response = requests.get(role_users_url, headers=headers)
+            response.raise_for_status()
+            
+            users = response.json()
+            
+            # Format users similar to whoami response
+            formatted_users = []
+            for user in users:
+                user_data = self._format_user_data(user)
+                user_data['roles'] = [role_name]  # Add the specific role we searched for
+                formatted_users.append(user_data)
+            
+            return formatted_users
+            
+        except requests.RequestException as e:
+            print(f"Error getting users by role: {e}")
+            return []
 
+    def add_attribute_value(self, user_id, attribute_name, value_to_add):
+        """
+        Add a value to a user's attribute (supports comma-separated values)
+        
+        Args:
+            user_id (str): The user ID to update
+            attribute_name (str): The name of the attribute (e.g., 'project-admin', 'study-contributor')
+            value_to_add (str): The value to add (e.g., project ID or study ID)
+            
+        Returns:
+            bool: True if update was successful, False otherwise
+        """
+        admin_token = self.get_admin_token()
+        if not admin_token:
+            return False
+        
+        try:
+            # Get current user data
+            user_url = f"{self.keycloak_url}/admin/realms/{self.realm}/users/{user_id}"
+            
+            headers = {
+                'Authorization': f'Bearer {admin_token}',
+                'Content-Type': 'application/json'
+            }
+            
+            response = requests.get(user_url, headers=headers)
+            response.raise_for_status()
+            
+            user = response.json()
+            attributes = user.get('attributes', {})
+            
+            # Get current attribute values
+            current_values = []
+            if attribute_name in attributes:
+                attr_values = attributes[attribute_name]
+                if isinstance(attr_values, list):
+                    # Join all list items and split by comma to handle mixed formats
+                    for attr_val in attr_values:
+                        current_values.extend([v.strip() for v in str(attr_val).split(',') if v.strip()])
+                else:
+                    current_values = [v.strip() for v in str(attr_values).split(',') if v.strip()]
+            
+            # Add new value if not already present
+            if value_to_add not in current_values:
+                current_values.append(value_to_add)
+            
+            # Store as comma-separated string in a list (Keycloak format)
+            attributes[attribute_name] = [','.join(current_values)] if current_values else []
+            user['attributes'] = attributes
+            
+            # Send update request
+            update_response = requests.put(user_url, headers=headers, json=user)
+            update_response.raise_for_status()
+            
+            return True
+            
+        except requests.RequestException as e:
+            print(f"Error adding attribute value: {e}")
+            return False
+    
+    def remove_attribute_value(self, user_id, attribute_name, value_to_remove):
+        """
+        Remove a value from a user's attribute (supports comma-separated values)
+        
+        Args:
+            user_id (str): The user ID to update
+            attribute_name (str): The name of the attribute (e.g., 'project-admin', 'study-contributor')
+            value_to_remove (str): The value to remove (e.g., project ID or study ID)
+            
+        Returns:
+            bool: True if update was successful, False otherwise
+        """
+        admin_token = self.get_admin_token()
+        if not admin_token:
+            return False
+        
+        try:
+            # Get current user data
+            user_url = f"{self.keycloak_url}/admin/realms/{self.realm}/users/{user_id}"
+            
+            headers = {
+                'Authorization': f'Bearer {admin_token}',
+                'Content-Type': 'application/json'
+            }
+            
+            response = requests.get(user_url, headers=headers)
+            response.raise_for_status()
+            
+            user = response.json()
+            attributes = user.get('attributes', {})
+            
+            # Get current attribute values
+            current_values = []
+            if attribute_name in attributes:
+                attr_values = attributes[attribute_name]
+                if isinstance(attr_values, list):
+                    # Join all list items and split by comma to handle mixed formats
+                    for attr_val in attr_values:
+                        current_values.extend([v.strip() for v in str(attr_val).split(',') if v.strip()])
+                else:
+                    current_values = [v.strip() for v in str(attr_values).split(',') if v.strip()]
+            
+            # Remove the value if present
+            if value_to_remove in current_values:
+                current_values.remove(value_to_remove)
+            
+            # Store as comma-separated string in a list (Keycloak format)
+            # If no values left, remove the attribute entirely
+            if current_values:
+                attributes[attribute_name] = [','.join(current_values)]
+            elif attribute_name in attributes:
+                del attributes[attribute_name]
+            
+            user['attributes'] = attributes
+            
+            # Send update request
+            update_response = requests.put(user_url, headers=headers, json=user)
+            update_response.raise_for_status()
+            
+            return True
+            
+        except requests.RequestException as e:
+            print(f"Error removing attribute value: {e}")
+            return False
 
-def require_permissions(required_scopes):
-    """Decorator to require specific RPT permissions"""
+def require_auth(keycloak_auth):
+    """Decorator to require authentication"""
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            user_permissions = set(g.user.get('permissions', []))
+            auth_header = request.headers.get('Authorization')
             
-            # Check if user has any of the required scopes
-            has_permission = any(scope in user_permissions for scope in required_scopes)
+            if not auth_header:
+                return {'error': 'No authorization header'}, 401
             
-            if not has_permission:
-                return jsonify({
-                    'error': f'Insufficient permissions. Required: {required_scopes}',
-                    'user_permissions': list(user_permissions),
-                    'rpt_permissions': g.user.get('rpt_permissions', [])
-                }), 403
+            try:
+                token = auth_header.split(' ')[1]  # Remove 'Bearer ' prefix
+            except IndexError:
+                return {'error': 'Invalid authorization header format'}, 401
+            
+            user_info = keycloak_auth.verify_token(token)
+            
+            if not user_info or 'error' in user_info:
+                error_msg = user_info.get('error', 'Token verification failed') if user_info else 'Token verification failed'
+                return {'error': error_msg}, 401
+            
+            # Add user info to request context
+            request.user = user_info
+            return f(*args, **kwargs)
+        
+        return decorated_function
+    return decorator
+
+def extract_user_info(token_payload):
+    """Extract useful user information from JWT payload"""
+    
+    realm_roles = []
+    if "realm_access" in token_payload and "roles" in token_payload["realm_access"]:
+        realm_roles = token_payload["realm_access"]["roles"]
+    
+    # Extract user attributes - they can be in different places in the JWT
+    user_attributes = {}
+    
+    standard_claims = {
+        'iss', 'sub', 'aud', 'exp', 'nbf', 'iat', 'jti', 'typ', 'azp',
+        'session_state', 'acr', 'allowed-origins', 'realm_access', 'resource_access',
+        'scope', 'sid', 'email_verified', 'name', 'preferred_username', 'given_name',
+        'family_name', 'email', 'groups'
+    }
+    
+    for key, value in token_payload.items():
+        if key not in standard_claims and not key.startswith(('realm_', 'resource_')):
+            user_attributes[key] = value
+
+    return {
+        'user_id': token_payload.get('sub'),
+        'username': token_payload.get('preferred_username'),
+        'email': token_payload.get('email'),
+        'organisation_id': token_payload.get('organisation_id'),
+        'roles': realm_roles,
+        'attributes': user_attributes,
+        'is_authenticated': True,
+    }
+
+def check_user_permission(user_info, permission_name, permissions_dict):
+    """Check if user has a specific permission"""
+    user_roles = user_info.get('roles', [])
+    required_roles = permissions_dict.get(permission_name, [])
+    return any(role in required_roles for role in user_roles)
+
+def require_permission_or_attribute(permission_name, permissions_dict, attribute_name=None, attribute_value_param=None):
+    """
+    Decorator to require either a specific permission OR a specific attribute value
+    
+    Args:
+        permission_name (str): The permission name to check
+        permissions_dict (dict): The permissions configuration
+        attribute_name (str): The attribute name to check (e.g., 'project-admin')
+        attribute_value_param (str): The parameter name in the route that contains the attribute value (e.g., 'project_id')
+    """
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if not hasattr(request, 'user'):
+                return {'error': 'Authentication required'}, 401
+            
+            user_info = extract_user_info(request.user)
+            
+            # First check if user has the general permission
+            if check_user_permission(user_info, permission_name, permissions_dict):
+                return f(*args, **kwargs)
+            
+            # If no general permission, check attribute-based access
+            if attribute_name and attribute_value_param:
+                # Get the attribute value from the route parameters
+                attribute_value = kwargs.get(attribute_value_param)
+                if not attribute_value:
+                    return {'error': 'Missing required parameter for attribute check'}, 400
+                
+                user_id = user_info.get('user_id')
+                if not user_id:
+                    return {'error': 'User ID not found in token'}, 401
+                
+                # We need access to the keycloak_auth instance - let's get it from the global scope
+                # This is a bit of a hack, but necessary for the decorator pattern
+                from flask import current_app
+                keycloak_auth = getattr(current_app, 'keycloak_auth', None)
+                
+                if not keycloak_auth:
+                    return {'error': 'Keycloak authentication not configured'}, 500
+                
+                # Check if user has the specific attribute value
+                if keycloak_auth.user_has_attribute(user_id, attribute_name, attribute_value):
+                    return f(*args, **kwargs)
+            
+            # If neither permission nor attribute check passed
+            return {
+                'error': 'Insufficient permissions',
+                'required_permission': permission_name,
+                'user_roles': user_info.get('roles', []),
+                'required_roles': permissions_dict.get(permission_name, []),
+                'attribute_check': f'{attribute_name}={attribute_value}' if attribute_name and attribute_value_param else None
+            }, 403
+        
+        return decorated_function
+    return decorator
+
+def require_permission(permission_name, permissions_dict):
+    """Decorator to require a specific permission"""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if not hasattr(request, 'user'):
+                return {'error': 'Authentication required'}, 401
+            
+            user_info = extract_user_info(request.user)
+            
+            if not check_user_permission(user_info, permission_name, permissions_dict):
+                return {
+                    'error': 'Insufficient permissions',
+                    'required_permission': permission_name,
+                    'user_roles': user_info.get('roles', []),
+                    'required_roles': permissions_dict.get(permission_name, [])
+                }, 403
             
             return f(*args, **kwargs)
         
         return decorated_function
     return decorator
 
-
-def require_project_access():
-    """Decorator to require project access based on privacy settings, organisation roles, and project group membership"""
-    def decorator(f):
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
-            try:
-                # Get project_id from URL path parameters or request data
-                project_id = kwargs.get('project_id') or kwargs.get('id')
-                
-                if not project_id:
-                    return jsonify({'error': 'Project ID not found in request'}), 400
-                
-                # Import here to avoid circular imports
-                from app import get_db_connection
-                
-                # Get project privacy setting and organisation from database
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                
-                cursor.execute("SELECT slug, privacy, organisation_id FROM projects WHERE id = %s", (project_id,))
-                project = cursor.fetchone()
-                
-                if not project:
-                    cursor.close()
-                    conn.close()
-                    return jsonify({'error': 'Project not found'}), 404
-                
-                project_slug, privacy, organisation_id = project
-                cursor.close()
-                conn.close()
-                
-                # If project is public, allow access
-                if privacy == 'public':
-                    logger.info(f"Allowing access to public project {project_slug}")
-                    return f(*args, **kwargs)
-                
-                # For private projects, check organisation and project-level permissions
-                username = g.user.get('preferred_username')
-                if not username:
-                    return jsonify({'error': 'User not authenticated'}), 401
-                
-                # Check organisation-level access first (Owner, Organisation Admin, Organisation Contributor, Organisation Viewer)
-                user_permissions = g.user.get('permissions', [])
-                
-                # Check for organisation-level roles that grant access to all projects
-                org_roles_with_access = [
-                    f"organisation-{organisation_id}-owner",
-                    f"organisation-{organisation_id}-admin", 
-                    f"organisation-{organisation_id}-contributor",
-                    f"organisation-{organisation_id}-viewer"
-                ]
-                
-                # Check if user has any organisation-level role for this project's organisation
-                for org_role in org_roles_with_access:
-                    if any(org_role in perm for perm in user_permissions):
-                        logger.info(f"User {username} has organisation-level access via {org_role} to project {project_slug}")
-                        return f(*args, **kwargs)
-                
-                # Fall back to project-specific group membership check
-                for permission in ['read', 'write', 'admin']:
-                    group_name = f"project-{project_slug}-{permission}"
-                    group = get_project_group_by_name(group_name)
-                    
-                    if group:
-                        # Check if user is member of this group
-                        members = get_project_group_members(project_slug, permission)
-                        user_in_group = any(member['username'] == username for member in members)
-                        
-                        if user_in_group:
-                            logger.info(f"User {username} has {permission} access to private project {project_slug}")
-                            return f(*args, **kwargs)
-                
-                # User is not a member of any relevant group or organisation role
-                logger.warning(f"User {username} denied access to private project {project_slug}")
-                return jsonify({'error': 'Access denied. You are not a member of this private project or organisation.'}), 403
-                
-            except Exception as e:
-                logger.error(f"Error checking project access: {e}")
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                return jsonify({'error': 'Authorisation check failed'}), 500
-        
-        return decorated_function
-    return decorator
-
-
-def require_study_access():
-    """Decorator to require study access based on project privacy settings, organisation roles, and group membership"""
-    def decorator(f):
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
-            try:
-                # Get study_id from URL path parameters or request data
-                study_id = kwargs.get('study_id') or kwargs.get('id')
-                
-                if not study_id:
-                    return jsonify({'error': 'Study ID not found in request'}), 400
-                
-                # Import here to avoid circular imports
-                from app import get_db_connection
-                
-                # Get study and its project privacy setting from database
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                
-                cursor.execute("""
-                    SELECT s.study_id, p.slug, p.privacy, p.organisation_id 
-                    FROM studies s 
-                    JOIN projects p ON s.project_id = p.id 
-                    WHERE s.id = %s
-                """, (study_id,))
-                study = cursor.fetchone()
-                
-                if not study:
-                    cursor.close()
-                    conn.close()
-                    return jsonify({'error': 'Study not found'}), 404
-                
-                study_code, project_slug, privacy, organisation_id = study
-                cursor.close()
-                conn.close()
-                
-                # If parent project is public, allow access
-                if privacy == 'public':
-                    logger.info(f"Allowing access to study {study_code} in public project {project_slug}")
-                    return f(*args, **kwargs)
-                
-                # For private projects, check organisation and project/study-level permissions
-                username = g.user.get('preferred_username')
-                if not username:
-                    return jsonify({'error': 'User not authenticated'}), 401
-                
-                # Check organisation-level access first
-                user_permissions = g.user.get('permissions', [])
-                
-                org_roles_with_access = [
-                    f"organisation-{organisation_id}-owner",
-                    f"organisation-{organisation_id}-admin", 
-                    f"organisation-{organisation_id}-contributor",
-                    f"organisation-{organisation_id}-viewer"
-                ]
-                
-                for org_role in org_roles_with_access:
-                    if any(org_role in perm for perm in user_permissions):
-                        logger.info(f"User {username} has organisation-level access via {org_role} to study {study_code}")
-                        return f(*args, **kwargs)
-                
-                # Check project-level access
-                for permission in ['read', 'write', 'admin']:
-                    group_name = f"project-{project_slug}-{permission}"
-                    group = get_project_group_by_name(group_name)
-                    
-                    if group:
-                        members = get_project_group_members(project_slug, permission)
-                        user_in_group = any(member['username'] == username for member in members)
-                        
-                        if user_in_group:
-                            logger.info(f"User {username} has {permission} access to study {study_code} via project {project_slug}")
-                            return f(*args, **kwargs)
-                
-                # Check study-level access
-                for permission in ['read', 'write']:
-                    group_name = f"study-{study_code}-{permission}"
-                    group = get_project_group_by_name(group_name)
-                    
-                    if group:
-                        members = get_study_group_members(study_code, permission)
-                        user_in_group = any(member['username'] == username for member in members)
-                        
-                        if user_in_group:
-                            logger.info(f"User {username} has {permission} access to study {study_code}")
-                            return f(*args, **kwargs)
-                
-                # User is not a member of any relevant group or organisation role
-                logger.warning(f"User {username} denied access to study {study_code} in private project {project_slug}")
-                return jsonify({'error': 'Access denied. You are not a member of this private project, study, or organisation.'}), 403
-                
-            except Exception as e:
-                logger.error(f"Error checking study access: {e}")
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                return jsonify({'error': 'Authorisation check failed'}), 500
-        
-        return decorated_function
-    return decorator
-
-
-def get_project_group_members(project_code, permission):
-    """Get all members of a project group with specific permission"""
-    try:
-        group_name = f"project-{project_code}-{permission}"
-        logger.info(f"Getting members for group: {group_name}")
-        
-        service_token = get_service_token()
-        if not service_token:
-            logger.error("Failed to get service token")
-            return []
-        
-        headers = {
-            'Authorization': f'Bearer {service_token}',
-            'Content-Type': 'application/json'
-        }
-        
-        # Get the group
-        groups_response = requests.get(f"{KEYCLOAK_ADMIN_BASE_URI}/groups?search={group_name}", 
-                                     headers=headers, timeout=10)
-        if groups_response.status_code != 200:
-            logger.error(f"Failed to search for group: {groups_response.status_code}")
-            return []
-        
-        groups = groups_response.json()
-        group = None
-        for g in groups:
-            if g['name'] == group_name:
-                group = g
-                break
-        
-        if not group:
-            logger.warning(f"Group '{group_name}' not found")
-            return []
-        
-        group_id = group['id']
-        
-        # Get group members
-        members_response = requests.get(f"{KEYCLOAK_ADMIN_BASE_URI}/groups/{group_id}/members", 
-                                      headers=headers, timeout=10)
-        
-        if members_response.status_code != 200:
-            logger.error(f"Failed to get group members: {members_response.status_code}")
-            return []
-        
-        members = members_response.json()
-        
-        # Extract relevant user info
-        member_list = []
-        for member in members:
-            member_info = {
-                'id': member.get('id'),
-                'username': member.get('username'),
-                'email': member.get('email'),
-                'firstName': member.get('firstName'),
-                'lastName': member.get('lastName'),
-                'enabled': member.get('enabled', False),
-                'created_at': member.get('createdTimestamp')
-            }
-            member_list.append(member_info)
-        
-        logger.info(f"Found {len(member_list)} members in group '{group_name}'")
-        return member_list
-        
-    except Exception as e:
-        logger.error(f"Failed to get group members for {project_code}-{permission}: {e}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return []
-
-
-def get_study_group_members(study_code, permission):
-    """Get members of a study group (read/write)"""
-    try:
-        service_token = get_service_token()
-        if not service_token:
-            logger.error("Failed to get service token")
-            return []
-        
-        headers = {
-            'Authorization': f'Bearer {service_token}',
-            'Content-Type': 'application/json'
-        }
-        
-        # Construct group name
-        group_name = f"study-{study_code}-{permission}"
-        
-        # Search for the group
-        groups_response = requests.get(f"{KEYCLOAK_ADMIN_BASE_URI}/groups?search={group_name}", 
-                                     headers=headers, timeout=10)
-        
-        if groups_response.status_code != 200:
-            logger.error(f"Failed to search for group: {groups_response.status_code}")
-            return []
-        
-        groups = groups_response.json()
-        group = None
-        for g in groups:
-            if g['name'] == group_name:
-                group = g
-                break
-        
-        if not group:
-            logger.warning(f"Group '{group_name}' not found")
-            return []
-        
-        group_id = group['id']
-        
-        # Get group members
-        members_response = requests.get(f"{KEYCLOAK_ADMIN_BASE_URI}/groups/{group_id}/members", 
-                                      headers=headers, timeout=10)
-        
-        if members_response.status_code != 200:
-            logger.error(f"Failed to get group members: {members_response.status_code}")
-            return []
-        
-        members = members_response.json()
-        
-        # Extract relevant user info
-        member_list = []
-        for member in members:
-            member_info = {
-                'id': member.get('id'),
-                'username': member.get('username'),
-                'email': member.get('email'),
-                'firstName': member.get('firstName'),
-                'lastName': member.get('lastName'),
-                'enabled': member.get('enabled', False),
-                'created_at': member.get('createdTimestamp')
-            }
-            member_list.append(member_info)
-        
-        logger.info(f"Found {len(member_list)} members in study group '{group_name}'")
-        return member_list
-        
-    except Exception as e:
-        logger.error(f"Failed to get study group members for {study_code}-{permission}: {e}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return []
-
-
-def check_user_organisation_role(username, organisation_id, required_role_level):
+def require_organization_access(permission_name, permissions_dict, resource_id_param, 
+                              attribute_names=None, allow_public=False, allow_system_admin=True):
     """
-    Check if user has the required organisation-level role
+    Decorator to require organization-based access control with proper permission AND organization logic
+    
+    This decorator implements the correct access control logic:
+    1. If public resource AND allow_public=True → Allow anyone (even unauthenticated)
+    2. If system-admin → Allow (bypasses all restrictions)
+    3. If has permission AND same organization → Allow
+    4. If has ANY of the specified attributes for this resource → Allow
+    5. Otherwise → Deny
     
     Args:
-        username: The username to check
-        organisation_id: The organisation ID to check against
-        required_role_level: Minimum role level required ('viewer', 'contributor', 'admin', 'owner')
-    
-    Returns:
-        bool: True if user has required role or higher
+        permission_name (str): The permission name to check (e.g., 'list_project_users')
+        permissions_dict (dict): The permissions configuration
+        resource_id_param (str): The parameter name in the route that contains the resource ID (e.g., 'project_id')
+        attribute_names (list, optional): List of attribute names to check (e.g., ['project-admin', 'project-contributor', 'project-viewer'])
+        allow_public (bool): Whether to allow unauthenticated access for public resources (default: False)
+        allow_system_admin (bool): Whether system-admin can bypass all restrictions (default: True)
     """
-    try:
-        # Define role hierarchy (higher index = higher permission)
-        role_hierarchy = ['viewer', 'contributor', 'admin', 'owner']
-        required_index = role_hierarchy.index(required_role_level)
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            # Get the resource ID from route parameters
+            resource_id = kwargs.get(resource_id_param)
+            if not resource_id:
+                return {'error': f'Missing required parameter: {resource_id_param}'}, 400
+            
+            # Get resource information from database (including privacy setting)
+            try:
+                from database import get_db_cursor
+                
+                # Determine the table name based on resource_id_param
+                if resource_id_param == 'project_id':
+                    table_name = 'projects'
+                    id_column = 'id'
+                elif resource_id_param == 'study_id':
+                    table_name = 'studies'
+                    id_column = 'id'
+                else:
+                    # Default to projects for now
+                    table_name = 'projects'
+                    id_column = 'id'
+                
+                with get_db_cursor() as cursor:
+                    cursor.execute(f"""
+                        SELECT organisation_id, privacy 
+                        FROM {table_name} 
+                        WHERE {id_column} = %s AND deleted_at IS NULL
+                    """, (resource_id,))
+                    
+                    resource = cursor.fetchone()
+                    
+                    if not resource:
+                        return {'error': f'{table_name.rstrip("s").title()} not found'}, 404
+                    
+                    resource_org_id = resource['organisation_id']
+                    is_public_resource = resource.get('privacy') == 'public'
+                    
+            except Exception as e:
+                return {'error': f'Database error during organization check: {str(e)}'}, 500
+            
+            # 1. Check if public resource and public access is allowed
+            if allow_public and is_public_resource:
+                return f(*args, **kwargs)
+            
+            # For all other checks, authentication is required
+            if not hasattr(request, 'user'):
+                return {'error': 'Authentication required'}, 401
+            
+            user_info = extract_user_info(request.user)
+            user_org_id = user_info.get('organisation_id')
+            user_roles = user_info.get('roles', [])
+            user_id = user_info.get('user_id')
+            
+            # 2. Check if user is system admin (bypass all restrictions if allowed)
+            is_system_admin = 'system-admin' in user_roles
+            if allow_system_admin and is_system_admin:
+                return f(*args, **kwargs)
+            
+            # 3. Check if user has permission AND same organization
+            if check_user_permission(user_info, permission_name, permissions_dict):
+                if user_org_id and user_org_id == resource_org_id:
+                    return f(*args, **kwargs)
+            
+            # 4. Check attribute-based access (if any attribute_names provided)
+            if attribute_names and user_id:
+                from flask import current_app
+                keycloak_auth = getattr(current_app, 'keycloak_auth', None)
+                
+                if keycloak_auth:
+                    # Check if user has ANY of the specified attributes for this resource
+                    for attribute_name in attribute_names:
+                        if keycloak_auth.user_has_attribute(user_id, attribute_name, resource_id):
+                            return f(*args, **kwargs)
+            
+            # 5. If none of the access checks passed, deny access
+            return {
+                'error': 'Insufficient permissions',
+                'required_permission': permission_name,
+                'user_roles': user_roles,
+                'required_roles': permissions_dict.get(permission_name, []),
+                'attribute_checks': attribute_names if attribute_names else None,
+                'organization_access': f'User org: {user_org_id}, Resource org: {resource_org_id}',
+                'resource_privacy': 'public' if is_public_resource else 'private',
+                'public_access_allowed': allow_public
+            }, 403
         
-        # Get user's permissions from JWT token context
-        user_permissions = g.user.get('permissions', [])
-        
-        # Check for organisation-level roles
-        for i, role in enumerate(role_hierarchy):
-            if i >= required_index:  # Check this role and all higher roles
-                org_role = f"organisation-{organisation_id}-{role}"
-                if any(org_role in perm for perm in user_permissions):
-                    logger.info(f"User {username} has organisation {role} access to organisation {organisation_id}")
-                    return True
-        
-        return False
-        
-    except ValueError:
-        logger.error(f"Invalid role level: {required_role_level}")
-        return False
-    except Exception as e:
-        logger.error(f"Error checking organisation role for {username}: {e}")
-        return False
+        return decorated_function
+    return decorator
+
+

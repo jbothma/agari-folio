@@ -1,0 +1,322 @@
+@folio = http://localhost:5000
+
+
+@realm = agari
+@client_id = dms
+@client_secret = VDyLEjGR3xDQvoQlrHq5AB6OwbW0Refc
+
+# @username = system.admin@agari.tech
+@username = owner@org1.ac.za
+# @username = owner@org2.ac.za
+# @username = org-admin@org1.ac.za
+# @username = org-admin@org2.ac.za
+# @username = test-user1@example.com
+
+
+@password = pass123
+
+
+### 1. LOGIN to get access token
+# @name login
+POST http://keycloak.local/realms/{{realm}}/protocol/openid-connect/token
+Content-Type: application/x-www-form-urlencoded
+
+username={{username}}
+&password={{password}}
+&grant_type=password
+&client_id={{client_id}}
+&client_secret={{client_secret}}
+
+###
+@token = {{login.response.body.access_token}}
+
+###
+### INFO
+###
+
+# @name health
+GET {{folio}}/info/health
+
+###
+
+# @name whoami
+GET {{folio}}/info/whoami
+Authorization: Bearer {{token}}
+
+###
+
+# @name permissions
+GET {{folio}}/info/permissions
+Authorization: Bearer {{token}}
+
+###
+
+# @name check_permission
+GET {{folio}}/info/permissions/check/view_org_private_projects
+Authorization: Bearer {{token}}
+
+###
+### PATHOGENS
+###
+
+# @name list_pathogens
+GET {{folio}}/pathogens
+
+###
+
+# @name list_pathogens_deleted
+GET {{folio}}/pathogens?deleted=true
+
+###
+
+# @name create_pathogen
+POST {{folio}}/pathogens
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "name": "Cholera",
+    "description": "Cholera Virus",
+    "scientific_name": "Vibrio cholerae"
+}
+
+###
+
+@pathogen_id = 0d7188c8-89d4-4b93-82dd-760a5e854bf7
+
+# @name get_pathogen
+GET {{folio}}/pathogens/{{pathogen_id}}
+
+###
+
+# @name delete_pathogen
+DELETE {{folio}}/pathogens/{{pathogen_id}}
+Authorization: Bearer {{token}}
+
+###
+
+# @name delete_pathogen_hard
+DELETE {{folio}}/pathogens/{{pathogen_id}}?hard=true
+Authorization: Bearer {{token}}
+
+###
+
+# @update_pathogen
+PUT {{folio}}/pathogens/{{pathogen_id}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "name": "Updated Pathogen Name",
+    "description": "Updated description",
+    "scientific_name": "Updated Scientific Name"
+}
+
+###
+
+# @name restore_pathogen
+POST {{folio}}/pathogens/{{pathogen_id}}/restore
+Authorization: Bearer {{token}}
+
+###
+### PROJECTS
+###
+
+# @name list_projects
+GET {{folio}}/projects
+Authorization: Bearer {{token}}
+
+
+###
+
+# @name create_project
+POST {{folio}}/projects
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "name": "Cholera Project",
+    "description": "Project description",
+    "pathogen_id": "{{pathogen_id}}",
+    "privacy": "public"
+}
+
+###
+
+@project_id = 80bd4fd2-10e3-4104-abe2-713dfdd92bfa
+
+### @name get_project
+GET {{folio}}/projects/{{project_id}}
+Authorization: Bearer {{token}}
+
+###
+
+# @name update_project
+PUT {{folio}}/projects/{{project_id}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "privacy": "private"
+}
+
+###
+
+# @name delete_project
+DELETE {{folio}}/projects/{{project_id}}
+Authorization: Bearer {{token}}
+
+###
+
+# @name delete_project_hard
+DELETE {{folio}}/projects/{{project_id}}?hard=true
+Authorization: Bearer {{token}}
+
+###
+
+# @name restore_project
+POST {{folio}}/projects/{{project_id}}/restore
+Authorization: Bearer {{token}}
+
+###
+### PROJECT USERS
+###
+
+# @name list_project_users
+GET {{folio}}/projects/{{project_id}}/users
+Authorization: Bearer {{token}}
+
+###
+
+# @name manage_project_users
+POST {{folio}}/projects/{{project_id}}/users
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "user_id": "ae5e9f95-5ead-430a-b5dd-2c411758b8f6",
+    "role": "project-admin"
+}
+
+
+###
+### STUDIES
+###
+
+# @name list_studies
+GET {{folio}}/studies
+Authorization: Bearer {{token}}
+
+###
+
+@study_id = study-001
+
+# @name create_study
+POST {{folio}}/studies
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "studyId": "{{study_id}}",
+    "name": "AGARI Test Study", 
+    "description": "Test study for genomic data workflow",
+    "projectId": "{{project_id}}",
+    "info": {
+        "projectType": "genomics",
+        "region": "South Africa"
+    }
+}
+
+
+
+# ### 3.1c. GET STUDY ANALYSES
+# GET http://song.local/studies/{{study_id}}/analysis
+# Authorization: Bearer {{token}}
+
+# ### 3.1d. LIST STUDIES
+# GET http://song.local/studies/all
+# Authorization: Bearer {{token}}
+
+# ### 3.2a. SUBMIT ANALYSIS
+# # @name submitAnalysis
+# POST http://song.local/submit/{{study_id}}/
+# Authorization: Bearer {{token}}
+# Content-Type: application/json
+
+# < ./data/analysis_submission.json
+
+# ### 3.2b. GET ANALYSIS DETAILS
+# # Extract analysis_id from step 4 response and get full analysis details
+# @submitted_analysis_id = {{submitAnalysis.response.body.analysisId}}
+# # @submitted_analysis_id = 759d93b7-3615-436a-9d93-b73615e36a12
+# # @name getAnalysis
+# GET http://song.local/studies/{{study_id}}/analysis/{{submitted_analysis_id}}
+# Authorization: Bearer {{token}}
+
+# ### === SCORE SERVICE ===
+
+# ### 4.1a. INITIALIZE SCORE UPLOAD
+# # Extract object_id from step 5 response
+# @object_id = {{getAnalysis.response.body.files[0].objectId}}
+# # @name initUpload
+# POST http://score.local/upload/{{object_id}}/uploads
+# Authorization: Bearer {{token}}
+# Content-Type: application/x-www-form-urlencoded
+
+# fileSize={{test_file_size}}
+# &md5={{test_file_md5}}
+# &overwrite=true
+
+# ###
+# @upload_id = {{initUpload.response.body.uploadId}}
+# @presigned_url = {{initUpload.response.body.parts.0.url}}
+
+# @md5 = {{initUpload.response.body.objectMd5}}
+
+# ### 4.1b. UPLOAD FILE TO MINIO
+# # Using hosts file entry: 127.0.0.1 minio (with port-forward to MinIO)
+# # @name uploadFile
+# PUT {{presigned_url}}
+# Content-Type: text/plain
+
+# < ./data/{{test_file_name}}
+
+# ###
+# # @etag = {{uploadFile.response.headers.ETag}}
+# @etag = a1421b18d7859ad811877b981fedca4f
+# # Debug variables before step 8a
+# @debug_object_id = {{object_id}}
+# @debug_etag = {{etag}}
+# # @etag_stripped = {{etag.replace('"', '')}}
+# @debug_md5 = {{md5}}
+# @debug_upload_id = {{upload_id}}
+
+# ### 4.1c. Finalise Part Upload
+# # @name finalizePartUpload
+# POST http://score.local/upload/{{object_id}}/parts?partNumber=1&etag={{etag}}&md5={{md5}}&uploadId={{upload_id}}
+# Authorization: Bearer {{token}}
+# Content-Type: application/json
+
+# ### 4.1d. Finalize upload
+# # @name finalizeUpload
+# POST http://score.local/upload/{{object_id}}?uploadId={{upload_id}}
+# Authorization: Bearer {{token}}
+# Content-Type: application/json
+
+# @analysis_id = adb67a21-c89c-49c5-b67a-21c89c29c511
+
+# ### === SONG SERVICE ===
+
+# ### 5.1a. PUBLISH ANALYSIS 
+# PUT http://song.local/studies/{{study_id}}/analysis/publish/{{analysis_id}}
+# Authorization: Bearer {{token}}
+
+# ### 5.1b. UNPUBLISH ANALYSIS
+# PUT http://song.local/studies/{{study_id}}/analysis/unpublish/{{analysis_id}}
+# Authorization: Bearer {{token}}
+
+# ### 5.2b. GET ANALYSIS DETAILS
+# # Extract analysis_id from step 4 response and get full analysis details
+# # @name getAnalysis
+# GET http://song.local/studies/{{study_id}}/analysis/{{analysis_id}}
+# Authorization: Bearer {{token}}
