@@ -12,10 +12,8 @@ from decimal import Decimal
 class CustomJSONEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, datetime):
-            # Format as YYYY-MM-DD HH:MM:SS (no microseconds or timezone)
             return obj.strftime('%Y-%m-%d %H:%M:%S')
         elif isinstance(obj, date):
-            # Format as YYYY-MM-DD
             return obj.strftime('%Y-%m-%d')
         elif isinstance(obj, Decimal):
             return float(obj)
@@ -44,12 +42,17 @@ api = Api(app,
 # Configure Flask-RESTX to use our custom JSON encoder
 app.config['RESTX_JSON'] = {'cls': CustomJSONEncoder}
 
-### Default namespace
+###
+### INFO
+###
 
 default_ns = api.namespace('info', description='Utility endpoints')
 
 @default_ns.route('/health')
 class Health(Resource):
+
+    ### GET /info/health ###
+
     @api.doc('get_health')
     def get(self):
         """Check application health status"""
@@ -57,6 +60,9 @@ class Health(Resource):
 
 @default_ns.route('/health/db')
 class DatabaseHealth(Resource):
+
+    ### GET /info/health/db ###
+
     @api.doc('get_db_health')
     def get(self):
         """Check database connectivity and schema"""
@@ -72,6 +78,9 @@ class DatabaseHealth(Resource):
 
 @default_ns.route('/whoami')
 class WhoAmI(Resource):
+
+    ### GET /info/whoami ###
+
     @api.doc('get_whoami')
     @require_auth(keycloak_auth)
     def get(self):
@@ -80,6 +89,9 @@ class WhoAmI(Resource):
 
 @default_ns.route('/permissions')
 class Permissions(Resource):
+
+    ### GET /info/permissions ###
+
     @api.doc('get_permissions')
     @require_auth(keycloak_auth)
     def get(self):
@@ -88,6 +100,9 @@ class Permissions(Resource):
 
 @default_ns.route('/permissions/check/<permission_name>')
 class PermissionsCheck(Resource):
+
+    ### GET /info/permissions/check/<permission_name> ###
+
     @api.doc('check_permission')
     @require_auth(keycloak_auth)
     def get(self, permission_name):
@@ -109,6 +124,9 @@ pathogen_ns = api.namespace('pathogens', description='Pathogen management endpoi
 
 @pathogen_ns.route('/')
 class PathogenList(Resource):
+
+    ### GET /pathogens ###
+
     @api.doc('list_pathogens')
     def get(self):
         """List all pathogens (public access)
@@ -144,6 +162,9 @@ class PathogenList(Resource):
 
         except Exception as e:
             return {'error': f'Database error: {str(e)}'}, 500
+
+
+    ### POST /pathogens ###
 
     @api.doc('create_pathogen')
     @require_auth(keycloak_auth)
@@ -185,6 +206,9 @@ class PathogenList(Resource):
 
 @pathogen_ns.route('/<string:pathogen_id>')
 class Pathogen(Resource):
+
+    ### GET /pathogens/<pathogen_id> ###
+
     @api.doc('get_pathogen')
     def get(self, pathogen_id):
         """Get details of a specific pathogen by ID (public access)"""
@@ -205,6 +229,8 @@ class Pathogen(Resource):
                 
         except Exception as e:
             return {'error': f'Database error: {str(e)}'}, 500
+        
+    ### DELETE /pathogens/<pathogen_id> ###
 
     @api.doc('delete_pathogen')
     @require_auth(keycloak_auth)
@@ -258,6 +284,8 @@ class Pathogen(Resource):
                 
         except Exception as e:
             return {'error': f'Database error: {str(e)}'}, 500
+        
+    ### PUT /pathogens/<pathogen_id> ###
 
     @api.doc('update_pathogen')
     @require_auth(keycloak_auth)
@@ -304,6 +332,9 @@ class Pathogen(Resource):
 
 @pathogen_ns.route('/<string:pathogen_id>/restore')
 class PathogenRestore(Resource):
+
+    ### POST /pathogens/<pathogen_id>/restore ###
+
     @api.doc('restore_pathogen')
     @require_auth(keycloak_auth)
     @require_permission('create_pathogen', PERMISSIONS)
