@@ -11,7 +11,9 @@ class KeycloakAuth:
         self.client_id = client_id
         self.client_secret = client_secret
         self.public_key = None
-        
+
+    ### GET PUBLIC KEY ###
+
     def get_public_key(self):
         """Fetch public key from Keycloak for token verification"""
         try:
@@ -22,6 +24,8 @@ class KeycloakAuth:
         except requests.RequestException as e:
             print(f"Error fetching public key: {e}")
             return None
+        
+    ### VERIFY TOKEN ###
     
     def verify_token(self, token):
         """Extract user info from JWT token without signature verification"""
@@ -33,6 +37,8 @@ class KeycloakAuth:
         except Exception as e:
             return {'error': f'Token decode failed: {str(e)}'}
     
+    ### GET ADMIN TOKEN ###
+
     def get_admin_token(self):
         """Get admin access token for Keycloak API calls using service account"""
         try:
@@ -51,7 +57,132 @@ class KeycloakAuth:
         except requests.RequestException as e:
             print(f"Error getting admin token: {e}")
             return None
+        
+
+    def _user_has_attribute_value(self, user, attribute_name, attribute_value, exact_match=True):
+        
+        """
+        Check if a user has a specific attribute value (multi-valued attributes)
+        
+        Args:
+            user (dict): User object from Keycloak
+            attribute_name (str): The name of the attribute to check
+            attribute_value (str): The value to search for
+            exact_match (bool): If True, search for exact match; if False, search for partial match
+            
+        Returns:
+            bool: True if user has the attribute value, False otherwise
+        """
+
+        user_attributes = user.get('attributes', {})
+        
+        if attribute_name not in user_attributes:
+            return False
+        
+        attr_values = user_attributes[attribute_name]
+        
+        # Attributes are stored as lists in Keycloak (multi-valued)
+        if isinstance(attr_values, list):
+            if exact_match:
+                return attribute_value in attr_values
+            else:
+                return any(attribute_value.lower() in str(val).lower() for val in attr_values)
+        else:
+            # Fallback for single value (shouldn't happen with new setup)
+            if exact_match:
+                return str(attr_values) == attribute_value
+            else:
+                return attribute_value.lower() in str(attr_values).lower()
+        
+        return False
     
+    def _format_user_data(self, user):
+        
+        """
+        Format user data similar to whoami response
+        
+        Args:
+            user (dict): User object from Keycloak
+            
+        Returns:
+            dict: Formatted user data with user_id, username, organisation_id, roles, attributes
+        """
+        
+        # Extract custom attributes (excluding standard ones)
+        user_attributes = {}
+        attributes = user.get('attributes', {})
+        
+        for key, value in attributes.items():
+            if key != 'organisation_id':  # organisation_id is handled separately
+                user_attributes[key] = value
+        
+        return {
+            'user_id': user.get('id'),
+            'username': user.get('username'),
+            'email': user.get('email'),
+            'organisation_id': attributes.get('organisation_id', [None])[0] if attributes.get('organisation_id') else None,
+            'roles': [],  # Roles would need to be fetched separately if needed
+            'attributes': user_attributes,
+            'is_authenticated': True,
+        }
+    
+    ### GET USER ###
+    
+    def get_user(self, user_id):
+
+        """Fetch user details by user ID from Keycloak"""
+
+        admin_token = self.get_admin_token()
+        if not admin_token:
+            return None
+
+        try:
+            user_url = f"{self.keycloak_url}/admin/realms/{self.realm}/users/{user_id}"
+
+            headers = {
+                'Authorization': f'Bearer {admin_token}',
+                'Content-Type': 'application/json'
+            }
+            
+            response = requests.get(user_url, headers=headers)
+            response.raise_for_status()
+            return response.json()
+            
+        except requests.RequestException as e:
+            print(f"Error fetching user {user_id}: {e}")
+            return None
+        
+    ### GET USER ORG ###    
+
+    def get_user_org(self):
+
+        """Extract and verify JWT token from Authorization header"""
+
+        organisation_id = None      
+
+        auth_header = request.headers.get('Authorization')
+        if auth_header:
+            try:
+                token = auth_header.split(' ')[1] 
+                user_info_raw = self.verify_token(token)
+
+                if user_info_raw and 'error' not in user_info_raw:
+                    user_info = extract_user_info(user_info_raw)
+                    user_org_ids = user_info.get('organisation_id', [])
+                    organisation_id = user_org_ids[0] if user_org_ids and len(user_org_ids) > 0 else None
+                    
+                else:
+                    print(f"Token verification failed: {user_info_raw}")
+            except Exception as e:
+                print(f"Authentication failed: {str(e)}")
+                pass
+        else:
+            print(f"No Authorization header found")
+
+        return organisation_id
+
+    ### GET USERS BY ATTRIBUTE ###
+
     def get_users_by_attribute(self, attribute_name, attribute_value, exact_match=True):
         """
         Search for users by a specific attribute
@@ -71,7 +202,7 @@ class KeycloakAuth:
         try:
             # Keycloak admin API endpoint for users
             users_url = f"{self.keycloak_url}/admin/realms/{self.realm}/users"
-            
+
             headers = {
                 'Authorization': f'Bearer {admin_token}',
                 'Content-Type': 'application/json'
@@ -99,104 +230,29 @@ class KeycloakAuth:
         except requests.RequestException as e:
             print(f"Error searching users by attribute: {e}")
             return []
-    
-    def _user_has_attribute_value(self, user, attribute_name, attribute_value, exact_match=True):
+
+    ### GET USER ATTRIBUTES ###
+
+    def get_user_attributes(self, user_id):
         """
-        Check if a user has a specific attribute value (supports comma-separated values)
+        Fetch user attributes by user ID from Keycloak
         
         Args:
-            user (dict): User object from Keycloak
-            attribute_name (str): The name of the attribute to check
-            attribute_value (str): The value to search for
-            exact_match (bool): If True, search for exact match; if False, search for partial match
-            
+            user_id (str): The user ID to fetch attributes for
         Returns:
-            bool: True if user has the attribute value, False otherwise
+            dict: User attributes or empty dict if none
         """
-        user_attributes = user.get('attributes', {})
-        
-        if attribute_name not in user_attributes:
-            return False
-        
-        attr_values = user_attributes[attribute_name]
-        
-        # Attributes are stored as lists in Keycloak
-        if isinstance(attr_values, list):
-            for attr_val in attr_values:
-                if self._check_attribute_value(str(attr_val), attribute_value, exact_match):
-                    return True
-        else:
-            return self._check_attribute_value(str(attr_values), attribute_value, exact_match)
-        
-        return False
+
+        user = self.get_user(user_id)
+        if user:
+            return user.get('attributes', {})
+        return {}
     
-    def _check_attribute_value(self, attr_val, search_value, exact_match=True):
-        """
-        Check if an attribute value matches the search value (supports comma-separated values)
-        
-        Args:
-            attr_val (str): The attribute value to check
-            search_value (str): The value to search for
-            exact_match (bool): If True, search for exact match; if False, search for partial match
-            
-        Returns:
-            bool: True if there's a match, False otherwise
-        """
-        # Check if attribute value contains comma-separated values
-        if ',' in attr_val:
-            individual_values = [v.strip() for v in attr_val.split(',')]
-            if exact_match:
-                return search_value in individual_values
-            else:
-                return any(search_value.lower() in v.lower() for v in individual_values)
-        else:
-            # Single value check
-            if exact_match:
-                return search_value == attr_val
-            else:
-                return search_value.lower() in attr_val.lower()
-    
-    def _format_user_data(self, user):
-        """
-        Format user data similar to whoami response
-        
-        Args:
-            user (dict): User object from Keycloak
-            
-        Returns:
-            dict: Formatted user data with user_id, username, organisation_id, roles, attributes
-        """
-        # Extract custom attributes (excluding standard ones)
-        user_attributes = {}
-        attributes = user.get('attributes', {})
-        
-        for key, value in attributes.items():
-            if key != 'organisation_id':  # organisation_id is handled separately
-                user_attributes[key] = value
-        
-        return {
-            'user_id': user.get('id'),
-            'username': user.get('username'),
-            'email': user.get('email'),
-            'organisation_id': attributes.get('organisation_id', [None])[0] if attributes.get('organisation_id') else None,
-            'roles': [],  # Roles would need to be fetched separately if needed
-            'attributes': user_attributes,
-            'is_authenticated': True,
-        }
+    ### CHECK USER ATTRIBUTE ###
     
     def user_has_attribute(self, user_id, attribute_name, attribute_value, exact_match=True):
-        """
-        Check if a specific user has an attribute with a given value
-        
-        Args:
-            user_id (str): The user ID to check
-            attribute_name (str): The name of the attribute to check
-            attribute_value (str): The value to search for
-            exact_match (bool): If True, search for exact match; if False, search for partial match
-            
-        Returns:
-            bool: True if user has the attribute value, False otherwise
-        """
+       
+       
         admin_token = self.get_admin_token()
         if not admin_token:
             return False
@@ -220,62 +276,11 @@ class KeycloakAuth:
             print(f"Error checking user attribute: {e}")
             return False
     
-    def get_users_by_organization(self, organization_id):
-        """
-        Get all users belonging to a specific organization
-        
-        Args:
-            organization_id (str): The organization ID to search for
-            
-        Returns:
-            list: List of users in the organization
-        """
-        return self.get_users_by_attribute('organisation_id', organization_id)
+    ### MODIFY USER ATTRIBUTES ###
     
-    def get_users_by_role(self, role_name):
-        """
-        Get all users with a specific role
-        
-        Args:
-            role_name (str): The role name to search for
-            
-        Returns:
-            list: List of users with simplified format (user_id, username, organisation_id, roles, attributes)
-        """
-        admin_token = self.get_admin_token()
-        if not admin_token:
-            return []
-        
-        try:
-            # Get role members endpoint
-            role_users_url = f"{self.keycloak_url}/admin/realms/{self.realm}/roles/{role_name}/users"
-            
-            headers = {
-                'Authorization': f'Bearer {admin_token}',
-                'Content-Type': 'application/json'
-            }
-            
-            response = requests.get(role_users_url, headers=headers)
-            response.raise_for_status()
-            
-            users = response.json()
-            
-            # Format users similar to whoami response
-            formatted_users = []
-            for user in users:
-                user_data = self._format_user_data(user)
-                user_data['roles'] = [role_name]  # Add the specific role we searched for
-                formatted_users.append(user_data)
-            
-            return formatted_users
-            
-        except requests.RequestException as e:
-            print(f"Error getting users by role: {e}")
-            return []
-
     def add_attribute_value(self, user_id, attribute_name, value_to_add):
         """
-        Add a value to a user's attribute (supports comma-separated values)
+        Add a value to a user's multi-valued attribute
         
         Args:
             user_id (str): The user ID to update
@@ -304,23 +309,19 @@ class KeycloakAuth:
             user = response.json()
             attributes = user.get('attributes', {})
             
-            # Get current attribute values
-            current_values = []
-            if attribute_name in attributes:
-                attr_values = attributes[attribute_name]
-                if isinstance(attr_values, list):
-                    # Join all list items and split by comma to handle mixed formats
-                    for attr_val in attr_values:
-                        current_values.extend([v.strip() for v in str(attr_val).split(',') if v.strip()])
-                else:
-                    current_values = [v.strip() for v in str(attr_values).split(',') if v.strip()]
+            # Get current attribute values (as list)
+            current_values = attributes.get(attribute_name, [])
+            
+            # Ensure it's a list
+            if not isinstance(current_values, list):
+                current_values = [current_values] if current_values else []
             
             # Add new value if not already present
             if value_to_add not in current_values:
                 current_values.append(value_to_add)
             
-            # Store as comma-separated string in a list (Keycloak format)
-            attributes[attribute_name] = [','.join(current_values)] if current_values else []
+            # Update attributes
+            attributes[attribute_name] = current_values
             user['attributes'] = attributes
             
             # Send update request
@@ -335,7 +336,7 @@ class KeycloakAuth:
     
     def remove_attribute_value(self, user_id, attribute_name, value_to_remove):
         """
-        Remove a value from a user's attribute (supports comma-separated values)
+        Remove a value from a user's multi-valued attribute
         
         Args:
             user_id (str): The user ID to update
@@ -364,26 +365,22 @@ class KeycloakAuth:
             user = response.json()
             attributes = user.get('attributes', {})
             
-            # Get current attribute values
-            current_values = []
-            if attribute_name in attributes:
-                attr_values = attributes[attribute_name]
-                if isinstance(attr_values, list):
-                    # Join all list items and split by comma to handle mixed formats
-                    for attr_val in attr_values:
-                        current_values.extend([v.strip() for v in str(attr_val).split(',') if v.strip()])
-                else:
-                    current_values = [v.strip() for v in str(attr_values).split(',') if v.strip()]
+            # Get current attribute values (as list)
+            current_values = attributes.get(attribute_name, [])
+            
+            # Ensure it's a list
+            if not isinstance(current_values, list):
+                current_values = [current_values] if current_values else []
             
             # Remove the value if present
             if value_to_remove in current_values:
                 current_values.remove(value_to_remove)
             
-            # Store as comma-separated string in a list (Keycloak format)
-            # If no values left, remove the attribute entirely
+            # Update attributes
             if current_values:
-                attributes[attribute_name] = [','.join(current_values)]
+                attributes[attribute_name] = current_values
             elif attribute_name in attributes:
+                # Remove attribute entirely if no values left
                 del attributes[attribute_name]
             
             user['attributes'] = attributes
@@ -398,8 +395,16 @@ class KeycloakAuth:
             print(f"Error removing attribute value: {e}")
             return False
 
+        
+
+    
+
+    
+
 def require_auth(keycloak_auth):
+
     """Decorator to require authentication"""
+    
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
@@ -427,6 +432,7 @@ def require_auth(keycloak_auth):
     return decorator
 
 def extract_user_info(token_payload):
+
     """Extract useful user information from JWT payload"""
     
     realm_roles = []
@@ -442,7 +448,7 @@ def extract_user_info(token_payload):
         'scope', 'sid', 'email_verified', 'name', 'preferred_username', 'given_name',
         'family_name', 'email', 'groups'
     }
-    
+
     for key, value in token_payload.items():
         if key not in standard_claims and not key.startswith(('realm_', 'resource_')):
             user_attributes[key] = value
@@ -457,201 +463,202 @@ def extract_user_info(token_payload):
         'is_authenticated': True,
     }
 
-def check_user_permission(user_info, permission_name, permissions_dict):
-    """Check if user has a specific permission"""
-    user_roles = user_info.get('roles', [])
-    required_roles = permissions_dict.get(permission_name, [])
-    return any(role in required_roles for role in user_roles)
-
-def require_permission_or_attribute(permission_name, permissions_dict, attribute_name=None, attribute_value_param=None):
-    """
-    Decorator to require either a specific permission OR a specific attribute value
     
-    Args:
-        permission_name (str): The permission name to check
-        permissions_dict (dict): The permissions configuration
-        attribute_name (str): The attribute name to check (e.g., 'project-admin')
-        attribute_value_param (str): The parameter name in the route that contains the attribute value (e.g., 'project_id')
-    """
-    def decorator(f):
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
-            if not hasattr(request, 'user'):
-                return {'error': 'Authentication required'}, 401
-            
-            user_info = extract_user_info(request.user)
-            
-            # First check if user has the general permission
-            if check_user_permission(user_info, permission_name, permissions_dict):
-                return f(*args, **kwargs)
-            
-            # If no general permission, check attribute-based access
-            if attribute_name and attribute_value_param:
-                # Get the attribute value from the route parameters
-                attribute_value = kwargs.get(attribute_value_param)
-                if not attribute_value:
-                    return {'error': 'Missing required parameter for attribute check'}, 400
-                
-                user_id = user_info.get('user_id')
-                if not user_id:
-                    return {'error': 'User ID not found in token'}, 401
-                
-                # We need access to the keycloak_auth instance - let's get it from the global scope
-                # This is a bit of a hack, but necessary for the decorator pattern
-                from flask import current_app
-                keycloak_auth = getattr(current_app, 'keycloak_auth', None)
-                
-                if not keycloak_auth:
-                    return {'error': 'Keycloak authentication not configured'}, 500
-                
-                # Check if user has the specific attribute value
-                if keycloak_auth.user_has_attribute(user_id, attribute_name, attribute_value):
-                    return f(*args, **kwargs)
-            
-            # If neither permission nor attribute check passed
-            return {
-                'error': 'Insufficient permissions',
-                'required_permission': permission_name,
-                'user_roles': user_info.get('roles', []),
-                'required_roles': permissions_dict.get(permission_name, []),
-                'attribute_check': f'{attribute_name}={attribute_value}' if attribute_name and attribute_value_param else None
-            }, 403
-        
-        return decorated_function
-    return decorator
-
-def require_permission(permission_name, permissions_dict):
-    """Decorator to require a specific permission"""
-    def decorator(f):
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
-            if not hasattr(request, 'user'):
-                return {'error': 'Authentication required'}, 401
-            
-            user_info = extract_user_info(request.user)
-            
-            if not check_user_permission(user_info, permission_name, permissions_dict):
-                return {
-                    'error': 'Insufficient permissions',
-                    'required_permission': permission_name,
-                    'user_roles': user_info.get('roles', []),
-                    'required_roles': permissions_dict.get(permission_name, [])
-                }, 403
-            
-            return f(*args, **kwargs)
-        
-        return decorated_function
-    return decorator
-
-def require_organization_access(permission_name, permissions_dict, resource_id_param, 
-                              attribute_names=None, allow_public=False, allow_system_admin=True):
-    """
-    Decorator to require organization-based access control with proper permission AND organization logic
     
-    This decorator implements the correct access control logic:
-    1. If public resource AND allow_public=True → Allow anyone (even unauthenticated)
-    2. If system-admin → Allow (bypasses all restrictions)
-    3. If has permission AND same organization → Allow
-    4. If has ANY of the specified attributes for this resource → Allow
-    5. Otherwise → Deny
     
-    Args:
-        permission_name (str): The permission name to check (e.g., 'list_project_users')
-        permissions_dict (dict): The permissions configuration
-        resource_id_param (str): The parameter name in the route that contains the resource ID (e.g., 'project_id')
-        attribute_names (list, optional): List of attribute names to check (e.g., ['project-admin', 'project-contributor', 'project-viewer'])
-        allow_public (bool): Whether to allow unauthenticated access for public resources (default: False)
-        allow_system_admin (bool): Whether system-admin can bypass all restrictions (default: True)
-    """
-    def decorator(f):
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
-            # Get the resource ID from route parameters
-            resource_id = kwargs.get(resource_id_param)
-            if not resource_id:
-                return {'error': f'Missing required parameter: {resource_id_param}'}, 400
-            
-            # Get resource information from database (including privacy setting)
-            try:
-                from database import get_db_cursor
-                
-                # Determine the table name based on resource_id_param
-                if resource_id_param == 'project_id':
-                    table_name = 'projects'
-                    id_column = 'id'
-                elif resource_id_param == 'study_id':
-                    table_name = 'studies'
-                    id_column = 'id'
-                else:
-                    # Default to projects for now
-                    table_name = 'projects'
-                    id_column = 'id'
-                
-                with get_db_cursor() as cursor:
-                    cursor.execute(f"""
-                        SELECT organisation_id, privacy 
-                        FROM {table_name} 
-                        WHERE {id_column} = %s AND deleted_at IS NULL
-                    """, (resource_id,))
-                    
-                    resource = cursor.fetchone()
-                    
-                    if not resource:
-                        return {'error': f'{table_name.rstrip("s").title()} not found'}, 404
-                    
-                    resource_org_id = resource['organisation_id']
-                    is_public_resource = resource.get('privacy') == 'public'
-                    
-            except Exception as e:
-                return {'error': f'Database error during organization check: {str(e)}'}, 500
-            
-            # 1. Check if public resource and public access is allowed
-            if allow_public and is_public_resource:
-                return f(*args, **kwargs)
-            
-            # For all other checks, authentication is required
-            if not hasattr(request, 'user'):
-                return {'error': 'Authentication required'}, 401
-            
-            user_info = extract_user_info(request.user)
-            user_org_id = user_info.get('organisation_id')
-            user_roles = user_info.get('roles', [])
-            user_id = user_info.get('user_id')
-            
-            # 2. Check if user is system admin (bypass all restrictions if allowed)
-            is_system_admin = 'system-admin' in user_roles
-            if allow_system_admin and is_system_admin:
-                return f(*args, **kwargs)
-            
-            # 3. Check if user has permission AND same organization
-            if check_user_permission(user_info, permission_name, permissions_dict):
-                if user_org_id and user_org_id == resource_org_id:
-                    return f(*args, **kwargs)
-            
-            # 4. Check attribute-based access (if any attribute_names provided)
-            if attribute_names and user_id:
-                from flask import current_app
-                keycloak_auth = getattr(current_app, 'keycloak_auth', None)
-                
-                if keycloak_auth:
-                    # Check if user has ANY of the specified attributes for this resource
-                    for attribute_name in attribute_names:
-                        if keycloak_auth.user_has_attribute(user_id, attribute_name, resource_id):
-                            return f(*args, **kwargs)
-            
-            # 5. If none of the access checks passed, deny access
-            return {
-                'error': 'Insufficient permissions',
-                'required_permission': permission_name,
-                'user_roles': user_roles,
-                'required_roles': permissions_dict.get(permission_name, []),
-                'attribute_checks': attribute_names if attribute_names else None,
-                'organization_access': f'User org: {user_org_id}, Resource org: {resource_org_id}',
-                'resource_privacy': 'public' if is_public_resource else 'private',
-                'public_access_allowed': allow_public
-            }, 403
+    
+    
+    # def get_users_by_organization(self, organization_id):
+    #     """
+    #     Get all users belonging to a specific organization
         
-        return decorated_function
-    return decorator
+    #     Args:
+    #         organization_id (str): The organization ID to search for
+            
+    #     Returns:
+    #         list: List of users in the organization
+    #     """
+    #     return self.get_users_by_attribute('organisation_id', organization_id)
+    
+    # def get_users_by_role(self, role_name):
+    #     """
+    #     Get all users with a specific role
+        
+    #     Args:
+    #         role_name (str): The role name to search for
+            
+    #     Returns:
+    #         list: List of users with simplified format (user_id, username, organisation_id, roles, attributes)
+    #     """
+    #     admin_token = self.get_admin_token()
+    #     if not admin_token:
+    #         return []
+        
+    #     try:
+    #         # Get role members endpoint
+    #         role_users_url = f"{self.keycloak_url}/admin/realms/{self.realm}/roles/{role_name}/users"
+            
+    #         headers = {
+    #             'Authorization': f'Bearer {admin_token}',
+    #             'Content-Type': 'application/json'
+    #         }
+            
+    #         response = requests.get(role_users_url, headers=headers)
+    #         response.raise_for_status()
+            
+    #         users = response.json()
+            
+    #         # Format users similar to whoami response
+    #         formatted_users = []
+    #         for user in users:
+    #             user_data = self._format_user_data(user)
+    #             user_data['roles'] = [role_name]  # Add the specific role we searched for
+    #             formatted_users.append(user_data)
+            
+    #         return formatted_users
+            
+    #     except requests.RequestException as e:
+    #         print(f"Error getting users by role: {e}")
+    #         return []
+
+    
+
+
+# def user_has_permission(user_info, permission_name, permissions_dict, resource_type=None, resource_id=None, keycloak_auth=None):
+#     """
+#     Unified permission checking function that handles all access control logic
+    
+#     Args:
+#         user_info (dict): User information from JWT token
+#         permission_name (str): The permission to check (e.g., 'edit_project')
+#         permissions_dict (dict): The PERMISSIONS configuration
+#         resource_type (str): Optional - 'project' or 'study' for resource-specific checks
+#         resource_id (str): Optional - specific resource ID for attribute-based checks
+#         keycloak_auth (KeycloakAuth): Optional - for attribute checking
+        
+#     Returns:
+#         tuple: (has_permission: bool, access_details: dict)
+#     """
+#     user_org_id = user_info.get('organisation_id')
+#     user_roles = user_info.get('roles', [])
+#     user_id = user_info.get('user_id')
+    
+#     # Initialize detailed response
+#     access_details = {
+#         'checks_performed': [],
+#         'access_granted_by': None,
+#         'reason': None,
+#         'required_roles': permissions_dict.get(permission_name, []),
+#         'attribute_checks': []
+#     }
+    
+#     # Get required roles for this permission
+#     required_roles = permissions_dict.get(permission_name, [])
+#     if not required_roles:
+#         access_details['reason'] = f'Permission "{permission_name}" not defined'
+#         access_details['checks_performed'].append('permission_definition_check')
+#         return False, access_details
+    
+#     # 1. Check if user is system admin (bypasses all restrictions)
+#     access_details['checks_performed'].append('system_admin_check')
+#     if 'system-admin' in user_roles:
+#         access_details['access_granted_by'] = 'system_admin_role'
+#         access_details['reason'] = 'User has system-admin role'
+#         return True, access_details
+    
+#     # Get resource organization if resource info provided
+#     resource_org_id = None
+#     if resource_type and resource_id:
+#         from database import get_db_cursor
+#         try:
+#             with get_db_cursor() as cursor:
+#                 if resource_type == 'project':
+#                     cursor.execute("SELECT organisation_id FROM projects WHERE id = %s", (resource_id,))
+#                 elif resource_type == 'study':
+#                     cursor.execute("""
+#                         SELECT p.organisation_id 
+#                         FROM studies s 
+#                         JOIN projects p ON s.project_id = p.id 
+#                         WHERE s.id = %s
+#                     """, (resource_id,))
+                
+#                 result = cursor.fetchone()
+#                 if result:
+#                     resource_org_id = result['organisation_id']
+#         except:
+#             pass  # If we can't get resource org, continue without it
+    
+#     # 2. Check standard organization-scoped roles
+#     access_details['checks_performed'].append('organization_role_check')
+#     for required_role in required_roles:
+#         if not required_role.startswith('attr-'):  # Skip attribute-based roles for now
+#             if required_role in user_roles:
+#                 # User has the role, now check organization scope
+#                 if resource_org_id and user_org_id != resource_org_id:
+#                     access_details['reason'] = f'User has role "{required_role}" but belongs to different organization'
+#                     continue
+#                 else:
+#                     access_details['access_granted_by'] = f'organization_role:{required_role}'
+#                     access_details['reason'] = f'User has role "{required_role}" and same organization'
+#                     return True, access_details
+    
+#     # 3. Check attribute-based roles (attr-project-admin, attr-study-contributor, etc.)
+#     if resource_id and user_id:
+#         access_details['checks_performed'].append('attribute_role_check')
+        
+#         for required_role in required_roles:
+#             if required_role.startswith('attr-'):
+#                 # Extract attribute name from role (e.g., 'attr-project-admin' -> 'project-admin')
+#                 attribute_name = required_role[5:]  # Remove 'attr-' prefix
+                
+#                 access_details['attribute_checks'].append({
+#                     'attribute_name': attribute_name,
+#                     'resource_id': resource_id,
+#                     'checked': True
+#                 })
+                
+#                 try:
+#                     # Fast path: Check JWT attributes first
+#                     user_attributes = user_info.get('attributes', {})
+#                     has_attribute = False
+                    
+#                     if attribute_name in user_attributes:
+#                         attr_values = user_attributes[attribute_name]
+#                         if isinstance(attr_values, list):
+#                             has_attribute = resource_id in attr_values
+#                         else:
+#                             has_attribute = str(attr_values) == resource_id
+                        
+#                         access_details['attribute_checks'][-1]['jwt_check'] = 'found' if has_attribute else 'not_found'
+#                     else:
+#                         access_details['attribute_checks'][-1]['jwt_check'] = 'attribute_not_in_jwt'
+                    
+#                     # If not found in JWT and we have keycloak_auth, fallback to API
+#                     if not has_attribute and keycloak_auth:
+#                         has_attribute = keycloak_auth.user_has_attribute(user_id, attribute_name, resource_id)
+#                         access_details['attribute_checks'][-1]['api_fallback'] = 'checked'
+                    
+#                     if has_attribute:
+#                         access_details['access_granted_by'] = f'attribute:{attribute_name}'
+#                         access_details['reason'] = f'User has attribute "{attribute_name}" for resource {resource_id}'
+#                         return True, access_details
+#                     else:
+#                         access_details['attribute_checks'][-1]['result'] = 'not_found'
+                        
+#                 except Exception as e:
+#                     access_details['attribute_checks'][-1]['result'] = f'error: {str(e)}'
+    
+#     # 4. If no access granted
+#     access_details['reason'] = 'User does not have required permissions'
+#     return False, access_details
+
+
+# def check_user_permission(user_info, permission_name, permissions_dict):
+#     """
+#     Simplified wrapper for backwards compatibility
+#     Only checks roles, not attributes or resource-specific access
+#     """
+#     has_permission, _ = user_has_permission(user_info, permission_name, permissions_dict)
+#     return has_permission
 
 

@@ -11,6 +11,8 @@
 # @username = org-admin@org1.ac.za
 # @username = org-admin@org2.ac.za
 # @username = test-user1@example.com
+# @username = test-user2@example.com
+# @username = test-user3@example.com
 
 
 @password = pass123
@@ -30,12 +32,17 @@ username={{username}}
 ###
 @token = {{login.response.body.access_token}}
 
-###
+##########################
 ### INFO
-###
+##########################
 
 # @name health
 GET {{folio}}/info/health
+
+###
+
+# @name databaseHealth
+GET {{folio}}/info//health/db
 
 ###
 
@@ -51,13 +58,28 @@ Authorization: Bearer {{token}}
 
 ###
 
+# @name userHasResourcePermission
+
+POST {{folio}}/info/permissions/check
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "permission": "view_org_private_projects",
+    "resource_type": "project",
+    "resource_id": "80bd4fd2-10e3-4104-abe2-713dfdd92bfa"
+}
+
+
+###
+
 # @name check_permission
 GET {{folio}}/info/permissions/check/view_org_private_projects
 Authorization: Bearer {{token}}
 
-###
+##########################
 ### PATHOGENS
-###
+##########################
 
 # @name list_pathogens
 GET {{folio}}/pathogens
@@ -75,14 +97,14 @@ Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-    "name": "Cholera",
-    "description": "Cholera Virus",
-    "scientific_name": "Vibrio cholerae"
+    "name": "Cholera2",
+    "description": "Cholera Virus2",
+    "scientific_name": "Vibrio cholerae2"
 }
 
 ###
 
-@pathogen_id = 0d7188c8-89d4-4b93-82dd-760a5e854bf7
+@pathogen_id = 30919090-a976-4d29-ba33-77b7f106481e
 
 # @name get_pathogen
 GET {{folio}}/pathogens/{{pathogen_id}}
@@ -107,9 +129,9 @@ Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-    "name": "Updated Pathogen Name",
-    "description": "Updated description",
-    "scientific_name": "Updated Scientific Name"
+    "name": "Cholera",
+    "description": "Cholera virus",
+    "scientific_name": "Vibrio cholerae"
 }
 
 ###
@@ -118,14 +140,13 @@ Content-Type: application/json
 POST {{folio}}/pathogens/{{pathogen_id}}/restore
 Authorization: Bearer {{token}}
 
-###
+##########################
 ### PROJECTS
-###
+##########################
 
 # @name list_projects
 GET {{folio}}/projects
 Authorization: Bearer {{token}}
-
 
 ###
 
@@ -143,7 +164,7 @@ Content-Type: application/json
 
 ###
 
-@project_id = 80bd4fd2-10e3-4104-abe2-713dfdd92bfa
+@project_id = 33f59eb7-9d1c-438f-8e12-fe6a8117184e
 
 ### @name get_project
 GET {{folio}}/projects/{{project_id}}
@@ -157,7 +178,7 @@ Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-    "privacy": "private"
+    "privacy": "public"
 }
 
 ###
@@ -178,9 +199,9 @@ Authorization: Bearer {{token}}
 POST {{folio}}/projects/{{project_id}}/restore
 Authorization: Bearer {{token}}
 
-###
+##########################
 ### PROJECT USERS
-###
+##########################
 
 # @name list_project_users
 GET {{folio}}/projects/{{project_id}}/users
@@ -188,20 +209,28 @@ Authorization: Bearer {{token}}
 
 ###
 
-# @name manage_project_users
+# @name add_project_users
 POST {{folio}}/projects/{{project_id}}/users
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-    "user_id": "ae5e9f95-5ead-430a-b5dd-2c411758b8f6",
-    "role": "project-admin"
+    "user_id": "282dd9ee-ad7e-4580-9677-fa37d7ba6435",
+    "role": "project-contributor"
 }
 
+###
 
-###
+@user_id = 282dd9ee-ad7e-4580-9677-fa37d7ba6435
+
+# @name delete_project_users
+DELETE {{folio}}/projects/{{project_id}}/users/{{user_id}}
+Authorization: Bearer {{token}}
+
+
+##########################
 ### STUDIES
-###
+##########################
 
 # @name list_studies
 GET {{folio}}/studies

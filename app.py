@@ -1,8 +1,8 @@
-from flask import Flask, jsonify, request
-from flask_restx import Api, Resource, fields
-from auth import KeycloakAuth, require_auth, extract_user_info, check_user_permission, require_permission, require_permission_or_attribute, require_organization_access
+from flask import Flask,request
+from flask_restx import Api, Resource
+from auth import KeycloakAuth, require_auth, extract_user_info
 from permissions import PERMISSIONS
-from database import get_db_cursor, test_connection, get_database_info
+from database import get_db_cursor, test_connection
 import os
 import json
 from datetime import datetime, date
@@ -29,7 +29,6 @@ keycloak_auth = KeycloakAuth(
     client_secret=os.getenv('KEYCLOAK_CLIENT_SECRET', 'VDyLEjGR3xDQvoQlrHq5AB6OwbW0Refc')
 )
 
-# Make keycloak_auth available to decorators
 app.keycloak_auth = keycloak_auth
 
 api = Api(app, 
@@ -42,9 +41,9 @@ api = Api(app,
 # Configure Flask-RESTX to use our custom JSON encoder
 app.config['RESTX_JSON'] = {'cls': CustomJSONEncoder}
 
-###
+##########################
 ### INFO
-###
+##########################
 
 default_ns = api.namespace('info', description='Utility endpoints')
 
@@ -68,10 +67,8 @@ class DatabaseHealth(Resource):
         """Check database connectivity and schema"""
         db_test = test_connection()
         if db_test:
-            db_info = get_database_info()
             return {
                 'status': 'healthy',
-                'database': db_info
             }
         else:
             return {'status': 'unhealthy', 'error': 'Database connection failed'}, 503
@@ -84,7 +81,9 @@ class WhoAmI(Resource):
     @api.doc('get_whoami')
     @require_auth(keycloak_auth)
     def get(self):
+
         """Get current user information from JWT token"""
+        
         return extract_user_info(request.user)
 
 @default_ns.route('/permissions')
@@ -95,9 +94,11 @@ class Permissions(Resource):
     @api.doc('get_permissions')
     @require_auth(keycloak_auth)
     def get(self):
-        """Get all defined permissions"""
-        return PERMISSIONS
 
+        """Get all defined permissions"""
+        
+        return PERMISSIONS
+    
 @default_ns.route('/permissions/check/<permission_name>')
 class PermissionsCheck(Resource):
 
@@ -106,19 +107,36 @@ class PermissionsCheck(Resource):
     @api.doc('check_permission')
     @require_auth(keycloak_auth)
     def get(self, permission_name):
-        """Check if the current user has a specific permission"""
-        user_info = extract_user_info(request.user)
-        has_permission = check_user_permission(user_info, permission_name, PERMISSIONS)
+
+        return
+
+@default_ns.route('/permissions/check')
+class PermissionsCheckResource(Resource):
+
+    ### POST /info/permissions/check ###
+
+    @api.doc('check_permission_for_resource')
+    @require_auth(keycloak_auth)
+    def post(self):
+
+        """Check if the current user has a specific permission for a resource
         
-        return {
-            'has_permission': has_permission,
-            'user_roles': user_info.get('roles', []),
-            'required_roles': PERMISSIONS.get(permission_name, [])
+        Request Body:
+        {
+            "resource_type": "project|study",
+            "resource_id": "<uuid>",
+            "permission": "edit_project|delete_project|etc"
         }
         
-###
+        Returns detailed permission check information for debugging
+        """
+
+        return
+
+
+##########################
 ### PATHOGENS
-###
+##########################
 
 pathogen_ns = api.namespace('pathogens', description='Pathogen management endpoints')
 
@@ -127,13 +145,15 @@ class PathogenList(Resource):
 
     ### GET /pathogens ###
 
-    @api.doc('list_pathogens')
+    @pathogen_ns.doc('list_pathogens')
     def get(self):
+
         """List all pathogens (public access)
         
         Query Parameters:
         - deleted: true/false (default: false) - If true, include soft-deleted pathogens
         """
+        
         try:
             # Check if deleted pathogens should be included
             include_deleted = request.args.get('deleted', 'false').lower() == 'true'
@@ -142,15 +162,14 @@ class PathogenList(Resource):
                 if include_deleted:
                     # Include all pathogens (both active and deleted)
                     cursor.execute("""
-                        SELECT id, name, scientific_name, description, created_at, updated_at, deleted_at,
-                               CASE WHEN deleted_at IS NULL THEN 'active' ELSE 'deleted' END as status
+                        SELECT *
                         FROM pathogens 
                         ORDER BY deleted_at IS NULL DESC, name
                     """)
                 else:
                     # Only active pathogens (default behavior)
                     cursor.execute("""
-                        SELECT id, name, scientific_name, description, created_at, updated_at
+                        SELECT *
                         FROM pathogens 
                         WHERE deleted_at IS NULL 
                         ORDER BY name
@@ -166,11 +185,12 @@ class PathogenList(Resource):
 
     ### POST /pathogens ###
 
-    @api.doc('create_pathogen')
+    @pathogen_ns.doc('create_pathogen')
     @require_auth(keycloak_auth)
-    @require_permission('create_pathogen', PERMISSIONS)
     def post(self):
+
         """Create a new pathogen (system-admin only)"""
+        
         try:
             data = request.get_json()
             if not data:
@@ -209,9 +229,11 @@ class Pathogen(Resource):
 
     ### GET /pathogens/<pathogen_id> ###
 
-    @api.doc('get_pathogen')
+    @pathogen_ns.doc('get_pathogen')
     def get(self, pathogen_id):
+
         """Get details of a specific pathogen by ID (public access)"""
+        
         try:
             with get_db_cursor() as cursor:
                 cursor.execute("""
@@ -232,15 +254,16 @@ class Pathogen(Resource):
         
     ### DELETE /pathogens/<pathogen_id> ###
 
-    @api.doc('delete_pathogen')
+    @pathogen_ns.doc('delete_pathogen')
     @require_auth(keycloak_auth)
-    @require_permission('delete_pathogen', PERMISSIONS)
     def delete(self, pathogen_id):
+
         """Delete a pathogen by ID (system-admin only)
         
         Query Parameters: 
         - hard: true/false (default: false) - If true, permanently delete from database
         """
+        
         try:
             # Check if hard delete is requested
             hard_delete = request.args.get('hard', 'false').lower() == 'true'
@@ -287,11 +310,12 @@ class Pathogen(Resource):
         
     ### PUT /pathogens/<pathogen_id> ###
 
-    @api.doc('update_pathogen')
+    @pathogen_ns.doc('update_pathogen')
     @require_auth(keycloak_auth)
-    @require_permission('edit_pathogen', PERMISSIONS)
     def put(self, pathogen_id):
+
         """Update a pathogen by ID (system-admin only)"""
+        
         try:
             data = request.get_json()
             if not data:
@@ -335,11 +359,12 @@ class PathogenRestore(Resource):
 
     ### POST /pathogens/<pathogen_id>/restore ###
 
-    @api.doc('restore_pathogen')
+    @pathogen_ns.doc('restore_pathogen')
     @require_auth(keycloak_auth)
-    @require_permission('create_pathogen', PERMISSIONS)
     def post(self, pathogen_id):
+
         """Restore a soft-deleted pathogen (system-admin only)"""
+        
         try:
             with get_db_cursor() as cursor:
                 cursor.execute("""
@@ -365,144 +390,72 @@ class PathogenRestore(Resource):
             return {'error': f'Database error: {str(e)}'}, 500
 
 
-###
+##########################
 ### PROJECTS
-###
+##########################
 
 project_ns = api.namespace('projects', description='Project management endpoints')
 
 @project_ns.route('/')
 class ProjectList(Resource):
+
+    ### GET /projects ###
+
     @api.doc('list_projects')
     def get(self):
-        """List projects based on user permissions
         
-        Query Parameters:
-        - deleted: true/false (default: false) - If true, include soft-deleted projects
-        """
-        try:
-            # Check if deleted projects should be included
-            include_deleted = request.args.get('deleted', 'false').lower() == 'true'
-            
-            # Get user's organization and permissions if authenticated
-            user_org_id = None
-            is_system_admin = False
-            can_view_org_private_projects = False
-            
-            auth_header = request.headers.get('Authorization')
-            if auth_header:
-                try:
-                    from auth import KeycloakAuth
-                    token = auth_header.split(' ')[1]
-                    user_info_raw = keycloak_auth.verify_token(token)
-                    if user_info_raw and 'error' not in user_info_raw:
-                        user_info = extract_user_info(user_info_raw)
-                        user_org_id = user_info.get('organisation_id')
-                        user_roles = user_info.get('roles', [])
-                        
-                        # Check if user is system admin
-                        is_system_admin = 'system-admin' in user_roles
-                        can_view_org_private_projects = check_user_permission(user_info, 'view_org_private_projects', PERMISSIONS)
-                        
-                        # Debug output
-                        print(f"Debug - User org: {user_org_id}")
-                        print(f"Debug - Is system admin: {is_system_admin}")
-                        print(f"Debug - Can view org private projects: {can_view_org_private_projects}")
-                        print(f"Debug - User roles: {user_roles}")
-                except:
-                    pass  # If token is invalid, just show public projects
+        """List projects based on user permissions"""
 
+        organisation_id = keycloak_auth.get_user_org()
+
+        try:
+                
             with get_db_cursor() as cursor:
-                if include_deleted:
-                    # Include all projects (both active and deleted) with privacy filtering
-                    if is_system_admin:
-                        # System admin can see all projects from all organizations
-                        cursor.execute("""
-                            SELECT id, name, description, organisation_id, user_id, privacy, created_at, updated_at, deleted_at,
-                                   CASE WHEN deleted_at IS NULL THEN 'active' ELSE 'deleted' END as status
-                            FROM projects
-                            ORDER BY deleted_at IS NULL DESC, name
-                        """)
-                    elif can_view_org_private_projects and user_org_id:
-                        # User can see public projects + all private projects from their org
-                        cursor.execute("""
-                            SELECT id, name, description, organisation_id, user_id, privacy, created_at, updated_at, deleted_at,
-                                   CASE WHEN deleted_at IS NULL THEN 'active' ELSE 'deleted' END as status
-                            FROM projects
-                            WHERE privacy = 'public' OR organisation_id = %s
-                            ORDER BY deleted_at IS NULL DESC, name
-                        """, (user_org_id,))
-                    elif user_org_id:
-                        # Regular authenticated user - see public + own org's private
-                        cursor.execute("""
-                            SELECT id, name, description, organisation_id, user_id, privacy, created_at, updated_at, deleted_at,
-                                   CASE WHEN deleted_at IS NULL THEN 'active' ELSE 'deleted' END as status
-                            FROM projects
-                            WHERE privacy = 'public' OR organisation_id = %s
-                            ORDER BY deleted_at IS NULL DESC, name
-                        """, (user_org_id,))
-                    else:
-                        # Unauthenticated user - only public projects
-                        cursor.execute("""
-                            SELECT id, name, description, organisation_id, user_id, privacy, created_at, updated_at, deleted_at,
-                                   CASE WHEN deleted_at IS NULL THEN 'active' ELSE 'deleted' END as status
-                            FROM projects
-                            WHERE privacy = 'public'
-                            ORDER BY deleted_at IS NULL DESC, name
-                        """)
+                    
+                if organisation_id is not None:
+                    cursor.execute("""
+                        SELECT id, name, organisation_id, privacy, created_at
+                        FROM projects
+                        WHERE deleted_at IS NULL
+                        AND (privacy = 'public' OR organisation_id = %s)
+                        ORDER BY name
+                    """, (organisation_id,))
+                    
                 else:
-                    # Only active projects with privacy filtering
-                    if is_system_admin:
-                        # System admin can see all active projects from all organizations
-                        print("Debug - Using system admin query")
-                        cursor.execute("""
-                            SELECT id, name, description, organisation_id, user_id, privacy, created_at, updated_at
-                            FROM projects
-                            WHERE deleted_at IS NULL
-                            ORDER BY name
-                        """)
-                    elif can_view_org_private_projects and user_org_id:
-                        # User can see public projects + all private projects from their org
-                        print(f"Debug - Using view_org_private_projects query for org: {user_org_id}")
-                        cursor.execute("""
-                            SELECT id, name, description, organisation_id, user_id, privacy, created_at, updated_at
-                            FROM projects
-                            WHERE deleted_at IS NULL AND (privacy = 'public' OR organisation_id = %s)
-                            ORDER BY name
-                        """, (user_org_id,))
-                    elif user_org_id:
-                        # Regular authenticated user - see public + own org's private
-                        print(f"Debug - Using regular authenticated user query for org: {user_org_id}")
-                        cursor.execute("""
-                            SELECT id, name, description, organisation_id, user_id, privacy, created_at, updated_at
-                            FROM projects
-                            WHERE deleted_at IS NULL AND (privacy = 'public' OR organisation_id = %s)
-                            ORDER BY name
-                        """, (user_org_id,))
-                    else:
-                        # Unauthenticated user - only public projects
-                        print("Debug - Using unauthenticated user query")
-                        cursor.execute("""
-                            SELECT id, name, description, organisation_id, user_id, privacy, created_at, updated_at
-                            FROM projects
-                            WHERE deleted_at IS NULL AND privacy = 'public'
-                            ORDER BY name
-                        """)
+                    cursor.execute("""
+                        SELECT id, name, organisation_id, privacy, created_at
+                        FROM projects
+                        WHERE deleted_at IS NULL
+                        AND privacy = 'public'
+                        ORDER BY name
+                    """)
 
                 projects = cursor.fetchall()
-                print(f"Debug - Found {len(projects)} projects")
-                for project in projects:
-                    print(f"Debug - Project: {project.get('name')} (org: {project.get('organisation_id')}, privacy: {project.get('privacy')})")
+                print(f"Found {len(projects)} projects")
+                for p in projects:
+                    print(f"Project '{p['name']}' - org: '{p['organisation_id']}', privacy: '{p['privacy']}'")
+                
                 return projects
 
         except Exception as e:
             return {'error': f'Database error: {str(e)}'}, 500
+        
+    ### POST /projects ###
 
     @api.doc('create_project')
     @require_auth(keycloak_auth)
-    @require_permission('create_project', PERMISSIONS)
     def post(self):
+        
         """Create a new project"""
+
+         # Extract user info to get the user_id and organisation_id
+        user_info = extract_user_info(request.user)
+        user_id = user_info.get('user_id')
+        organisation_id = user_info.get('organisation_id')[0]
+
+        if not organisation_id:
+            return {'error': 'User does not belong to any organization'}, 400
+
         try:
             data = request.get_json()
             if not data:
@@ -518,16 +471,11 @@ class ProjectList(Resource):
             if not pathogen_id:
                 return {'error': 'Associated pathogen_id is required'}, 400
 
-            # Extract user info to get the user_id
-            user_info = extract_user_info(request.user)
-            user_id = user_info.get('user_id')
-            organisation_id = user_info.get('organisation_id')
-
             with get_db_cursor() as cursor:
                 cursor.execute("""
                     INSERT INTO projects (name, description, pathogen_id, user_id, organisation_id, privacy)
                     VALUES (%s, %s, %s, %s, %s, %s)
-                    RETURNING id, name, description, organisation_id,user_id, pathogen_id, privacy, created_at
+                    RETURNING *
                 """, (name, description, pathogen_id, user_id, organisation_id, privacy))
 
                 new_project = cursor.fetchone()
@@ -542,86 +490,67 @@ class ProjectList(Resource):
                 return {'error': f'Project with name "{name}" already exists'}, 409
             return {'error': f'Database error: {str(e)}'}, 500
 
+
 @project_ns.route('/<string:project_id>')
 class Project(Resource):
+
+    ### GET /projects/<project_id> ###
+
     @api.doc('get_project')
     def get(self, project_id):
-        """Get details of a specific project by ID with privacy controls"""
-        try:
-            # Get user's organization and permissions if authenticated
-            user_org_id = None
-            is_system_admin = False
-            can_view_org_private_projects = False
-            
-            auth_header = request.headers.get('Authorization')
-            if auth_header:
-                try:
-                    from auth import KeycloakAuth
-                    token = auth_header.split(' ')[1]
-                    user_info_raw = keycloak_auth.verify_token(token)
-                    if user_info_raw and 'error' not in user_info_raw:
-                        user_info = extract_user_info(user_info_raw)
-                        user_org_id = user_info.get('organisation_id')
-                        user_roles = user_info.get('roles', [])
-                        
-                        # Check if user is system admin
-                        is_system_admin = 'system-admin' in user_roles
-                        can_view_org_private_projects = check_user_permission(user_info, 'view_org_private_projects', PERMISSIONS)
-                except:
-                    pass  # If token is invalid, just show public projects
 
+        """Get single project details based on user permissions"""
+
+        organisation_id = keycloak_auth.get_user_org()
+
+        try:
+                
             with get_db_cursor() as cursor:
-                cursor.execute("""
-                    SELECT id, name, description, pathogen_id, user_id, organisation_id, privacy, created_at, updated_at
-                    FROM projects 
-                    WHERE id = %s AND deleted_at IS NULL
-                """, (project_id,))
-                
+                    
+                if organisation_id is not None:
+                    cursor.execute("""
+                        SELECT *
+                        FROM projects
+                        WHERE id = %s AND deleted_at IS NULL
+                        AND (privacy = 'public' OR organisation_id = %s)
+                        ORDER BY name
+                    """, (project_id, organisation_id))
+                    
+                else:
+                    cursor.execute("""
+                        SELECT *
+                        FROM projects
+                        WHERE id = %s AND deleted_at IS NULL
+                        AND privacy = 'public'
+                        ORDER BY name
+                    """, (project_id,))
+
                 project = cursor.fetchone()
-                
                 if not project:
-                    return {'error': 'Project not found'}, 404
-                
-                # Apply privacy filtering
-                if project['privacy'] == 'private':
-                    # Private project - check permissions
-                    if is_system_admin:
-                        # System admin can see all projects from all organizations
-                        pass  # Allow access
-                    elif can_view_org_private_projects and user_org_id == project['organisation_id']:
-                        # User can see private projects from their org
-                        pass  # Allow access
-                    elif user_org_id == project['organisation_id']:
-                        # Regular authenticated user from same org
-                        pass  # Allow access
-                    else:
-                        # User not authorized to view this private project
-                        return {'error': 'Project not found'}, 404
-                
-                return project
-                
+                    return {'error': 'Project not found or access denied'}, 404
+                else:
+                    return project
+
         except Exception as e:
             return {'error': f'Database error: {str(e)}'}, 500
-
-    @api.doc('delete_project')
-    @require_auth(keycloak_auth)
-    @require_organization_access('delete_org_projects', PERMISSIONS, 'project_id')
-    def delete(self, project_id):
-        """Delete a project by ID with organization-based permissions
         
-        Query Parameters: 
-        - hard: true/false (default: false) - If true, permanently delete from database
-        """
-        try:
-            # Get user info for hard delete check
-            user_info = extract_user_info(request.user)
-            user_roles = user_info.get('roles', [])
-            is_system_admin = 'system-admin' in user_roles
-            
-            # Get the project
+    ### PUT /projects/<project_id> ###    
+        
+    @api.doc('update_project')
+    @require_auth(keycloak_auth)
+    def put(self, project_id):
+
+        """Update a project by ID user permissions and organisation scope"""
+
+        organisation_id = keycloak_auth.get_user_org()
+
+        if not organisation_id:
+            return {'error': 'User does not belong to any organization'}, 400
+        else:
+            print(f"User's organisation_id: {organisation_id}")
             with get_db_cursor() as cursor:
                 cursor.execute("""
-                    SELECT id, name, organisation_id
+                    SELECT organisation_id 
                     FROM projects 
                     WHERE id = %s AND deleted_at IS NULL
                 """, (project_id,))
@@ -631,51 +560,11 @@ class Project(Resource):
                 if not project:
                     return {'error': 'Project not found or already deleted'}, 404
                 
-                # Proceed with deletion
-                hard_delete = request.args.get('hard', 'false').lower() == 'true'
+                project_org_id = project['organisation_id']
                 
-                if hard_delete:
-                    # Hard delete is only allowed for system admin
-                    if not is_system_admin:
-                        return {'error': 'Hard delete requires system admin privileges'}, 403
-                    
-                    # Hard delete - permanently remove from database
-                    cursor.execute("""
-                        DELETE FROM projects 
-                        WHERE id = %s
-                        RETURNING id, name
-                    """, (project_id,))
-                    
-                    deleted_project = cursor.fetchone()
-                    
-                    return {
-                        'message': f'Project "{deleted_project["name"]}" permanently deleted',
-                        'delete_type': 'hard'
-                    }
-                else:
-                    # Soft delete - set deleted_at timestamp
-                    cursor.execute("""
-                        UPDATE projects 
-                        SET deleted_at = NOW(), updated_at = NOW()
-                        WHERE id = %s AND deleted_at IS NULL
-                        RETURNING id, name
-                    """, (project_id,))
-                    
-                    deleted_project = cursor.fetchone()
-                    
-                    return {
-                        'message': f'Project "{deleted_project["name"]}" deleted (can be restored)',
-                        'delete_type': 'soft'
-                    }
-                
-        except Exception as e:
-            return {'error': f'Database error: {str(e)}'}, 500
-        
-    @api.doc('update_project')
-    @require_auth(keycloak_auth)
-    @require_organization_access('edit_org_projects', PERMISSIONS, 'project_id')
-    def put(self, project_id):
-        """Update a project by ID with organization-based permissions (only updates provided fields)"""
+                if project_org_id != organisation_id:
+                    return {'error': 'User does not have permission to update this project'}, 403
+
         try:
             data = request.get_json()
             if not data:
@@ -705,15 +594,14 @@ class Project(Resource):
             
             # Always update the updated_at timestamp
             update_fields.append('updated_at = NOW()')
-            update_values.append(project_id)  # For the WHERE clause
+            update_values.append(project_id)
 
             with get_db_cursor() as cursor:
-                # Proceed with update (organization check already done by decorator)
                 query = f"""
                     UPDATE projects 
                     SET {', '.join(update_fields)}
                     WHERE id = %s AND deleted_at IS NULL
-                    RETURNING id, name, description, pathogen_id, user_id, organisation_id, privacy, updated_at
+                    RETURNING *
                 """
                 
                 cursor.execute(query, update_values)
@@ -733,28 +621,126 @@ class Project(Resource):
                 return {'error': f'Project name already exists'}, 409
             return {'error': f'Database error: {str(e)}'}, 500
         
+
+    ### DELETE /projects/<project_id> ###
+
+    @api.doc('delete_project')
+    @require_auth(keycloak_auth)
+    def delete(self, project_id):
+
+        """Delete a project by ID user permissions and organisation scope
+
+        Query Parameters: 
+        - hard: true/false (default: false) - If true, permanently delete from database
+        """
+
+        organisation_id = keycloak_auth.get_user_org()
+
+        if not organisation_id:
+            return {'error': 'User does not belong to any organization'}, 400
+        else:
+            print(f"User's organisation_id: {organisation_id}")
+            with get_db_cursor() as cursor:
+                cursor.execute("""
+                    SELECT organisation_id 
+                    FROM projects 
+                    WHERE id = %s
+                """, (project_id,))
+                
+                project = cursor.fetchone()
+                
+                if not project:
+                    return {'error': 'Project not found or already deleted'}, 404
+                
+                project_org_id = project['organisation_id']
+                
+                if project_org_id != organisation_id:
+                    return {'error': 'User does not have permission to delete this project'}, 403
+
+        try:
+            # Check if hard delete is requested
+            hard_delete = request.args.get('hard', 'false').lower() == 'true'
+            
+            with get_db_cursor() as cursor:
+                if hard_delete:
+                    # Hard delete - permanently remove from database
+                    cursor.execute("""
+                        DELETE FROM projects 
+                        WHERE id = %s
+                        RETURNING id, name
+                    """, (project_id,))
+                    
+                    deleted_project = cursor.fetchone()
+                    
+                    if not deleted_project:
+                        return {'error': 'Project not found'}, 404
+                    
+                    return {
+                        'message': f'Project "{deleted_project["name"]}" permanently deleted',
+                        'delete_type': 'hard'
+                    }
+                else:
+                    # Soft delete - set deleted_at timestamp
+                    cursor.execute("""
+                        UPDATE projects 
+                        SET deleted_at = NOW(), updated_at = NOW()
+                        WHERE id = %s AND deleted_at IS NULL
+                        RETURNING id, name
+                    """, (project_id,))
+                    
+                    deleted_project = cursor.fetchone()
+                    
+                    if not deleted_project:
+                        return {'error': 'Project not found or already deleted'}, 404
+                    
+                    return {
+                        'message': f'Project "{deleted_project["name"]}" deleted (can be restored)',
+                        'delete_type': 'soft'
+                    }
+                
+        except Exception as e:
+            return {'error': f'Database error: {str(e)}'}, 500
+
 @project_ns.route('/<string:project_id>/restore')
 class ProjectRestore(Resource):
+    
+    ### POST /projects/<project_id>/restore ###
+    
     @api.doc('restore_project')
-    @require_auth(keycloak_auth)
     def post(self, project_id):
+
         """Restore a soft-deleted project (system-admin only)"""
+
+        organisation_id = keycloak_auth.get_user_org()
+
+        if not organisation_id:
+            return {'error': 'User does not belong to any organization'}, 400
+        else:
+            print(f"User's organisation_id: {organisation_id}")
+            with get_db_cursor() as cursor:
+                cursor.execute("""
+                    SELECT organisation_id 
+                    FROM projects 
+                    WHERE id = %s
+                """, (project_id,))
+                
+                project = cursor.fetchone()
+                
+                if not project:
+                    return {'error': 'Project not found or already deleted'}, 404
+                
+                project_org_id = project['organisation_id']
+                
+                if project_org_id != organisation_id:
+                    return {'error': 'User does not have permission to restore this project'}, 403
+                
         try:
-            # Get user info and check if user is system admin
-            user_info = extract_user_info(request.user)
-            user_roles = user_info.get('roles', [])
-            
-            is_system_admin = 'system-admin' in user_roles
-            
-            if not is_system_admin:
-                return {'error': 'Restore requires system admin privileges'}, 403
-            
             with get_db_cursor() as cursor:
                 cursor.execute("""
                     UPDATE projects 
                     SET deleted_at = NULL, updated_at = NOW()
                     WHERE id = %s AND deleted_at IS NOT NULL
-                    RETURNING id, name, description, updated_at
+                    RETURNING *
                 """, (project_id,))
                 
                 restored_project = cursor.fetchone()
@@ -766,7 +752,6 @@ class ProjectRestore(Resource):
                     'message': f'Project "{restored_project["name"]}" restored successfully',
                     'project': restored_project
                 }
-                
         except Exception as e:
             if 'duplicate key value violates unique constraint' in str(e):
                 return {'error': 'Cannot restore: A project with this name already exists'}, 409
@@ -775,15 +760,40 @@ class ProjectRestore(Resource):
 
 @project_ns.route('/<string:project_id>/users')
 class ProjectUsers(Resource):
+    
+    ### GET /projects/<project_id>/users ###
+    
     @api.doc('list_project_users')
     @require_auth(keycloak_auth)
-    @require_organization_access('list_project_users', PERMISSIONS, 'project_id', 'project-admin')
     def get(self, project_id):
+
         """List users associated with a project"""
+
         try:
-            project_admins = keycloak_auth.get_users_by_attribute('project-admin', project_id)
-            project_contributors = keycloak_auth.get_users_by_attribute('project-contributor', project_id)
-            project_viewers = keycloak_auth.get_users_by_attribute('project-viewer', project_id)
+            # Get all users with any project role
+            all_project_admins = keycloak_auth.get_users_by_attribute('project-admin', project_id)
+            all_project_contributors = keycloak_auth.get_users_by_attribute('project-contributor', project_id)
+            all_project_viewers = keycloak_auth.get_users_by_attribute('project-viewer', project_id)
+
+            # Create sets of user IDs for each role
+            admin_user_ids = {user['user_id'] for user in all_project_admins}
+            contributor_user_ids = {user['user_id'] for user in all_project_contributors}
+            viewer_user_ids = {user['user_id'] for user in all_project_viewers}
+
+            # Apply role hierarchy: admin > contributor > viewer
+            # Remove lower privilege roles if user has higher privilege
+            
+            # If user is admin, remove them from contributor and viewer lists
+            contributor_user_ids = contributor_user_ids - admin_user_ids
+            viewer_user_ids = viewer_user_ids - admin_user_ids
+            
+            # If user is contributor (but not admin), remove them from viewer list
+            viewer_user_ids = viewer_user_ids - contributor_user_ids
+
+            # Filter the user lists based on the cleaned user ID sets
+            project_admins = [user for user in all_project_admins if user['user_id'] in admin_user_ids]
+            project_contributors = [user for user in all_project_contributors if user['user_id'] in contributor_user_ids]
+            project_viewers = [user for user in all_project_viewers if user['user_id'] in viewer_user_ids]
 
             return {
                 'project_id': project_id,
@@ -794,118 +804,235 @@ class ProjectUsers(Resource):
             }
         except Exception as e:
             return {'error': f'Failed to retrieve project users: {str(e)}'}, 500
-        
+    
+    ### POST /projects/<project_id>/users ###
+    ### Body: { "user_id": "<keycloak_user_id>", "role": "project-admin|project-contributor|project-viewer" } ###
     
     @api.doc('add_project_user')
     @require_auth(keycloak_auth)
-    @require_organization_access('manage_project_users', PERMISSIONS, 'project_id', 'project-admin')
     def post(self, project_id):
-        """Add a user to a project with a specific attribute"""
+
+        """Add a user to a project with a specific role"""
+
+        #####################
+        ### ABSTRACT THIS ###
+        #####################
+
+        organisation_id = keycloak_auth.get_user_org()
+
+        if not organisation_id:
+            return {'error': 'User does not belong to any organisation'}, 400
+        else:
+            print(f"User's organisation_id: {organisation_id}")
+            with get_db_cursor() as cursor:
+                cursor.execute("""
+                    SELECT organisation_id 
+                    FROM projects 
+                    WHERE id = %s
+                """, (project_id,))
+                
+                project = cursor.fetchone()
+                
+                if not project:
+                    return {'error': 'Project not found or already deleted'}, 404
+                
+                project_org_id = project['organisation_id']
+                
+                if project_org_id != organisation_id:
+                    return {'error': 'User does not have permission to manage users on this project'}, 403
+
+        ####################
+        ### END ABSTRACT ###
+        ####################
+
         try:
             data = request.get_json()
             if not data:
                 return {'error': 'No JSON data provided'}, 400
             
             user_id = data.get('user_id')
-            role = data.get('role')  # 'project-admin', 'project-contributor', 'project-viewer'
+            role = data.get('role')
+
+            if not user_id or role not in ['project-admin', 'project-contributor', 'project-viewer']:
+                return {'error': 'user_id and valid role (project-admin, project-contributor, project-viewer) are required'}, 400
             
-            if not user_id or not role:
-                return {'error': 'Both user_id and role are required'}, 400
+            # Check if user exists in Keycloak
+            user = keycloak_auth.get_user(user_id)
+            if not user:
+                return {'error': 'User not found in Keycloak'}, 404
+
+            # Remove user from all existing project roles first (role hierarchy enforcement)
+            removed_roles = []
+            for existing_role in ['project-admin', 'project-contributor', 'project-viewer']:
+                if keycloak_auth.user_has_attribute(user_id, existing_role, project_id):
+                    success = keycloak_auth.remove_attribute_value(user_id, existing_role, project_id)
+                    if success:
+                        removed_roles.append(existing_role)
+                        print(f"Removed project_id {project_id} from role {existing_role} for user {user_id}")
+                    else:
+                        return {'error': f'Failed to remove existing role {existing_role}'}, 500
             
-            if role not in ['project-admin', 'project-contributor', 'project-viewer']:
-                return {'error': 'Invalid role specified'}, 400
+            # Add the user to the new role
+            success = keycloak_auth.add_attribute_value(user_id, role, project_id)
+            if not success:
+                return {'error': f'Failed to add user to role {role}'}, 500
             
-            # Add attribute to user in Keycloak
-            if not keycloak_auth.add_attribute_value(user_id, role, project_id):
-                return {'error': 'Failed to add attribute to user in Keycloak'}, 500
-            
+            print(f"Added project_id {project_id} to role {role} for user {user_id}")
+
             return {
-                'message': f'User {user_id} added to project {project_id} as {role}'
+                'message': 'User added to project successfully',
+                'user_id': user_id,
+                'project_id': project_id,
+                'new_role': role,
+                'removed_roles': removed_roles
             }, 200
-            
+
         except Exception as e:
             return {'error': f'Failed to add user to project: {str(e)}'}, 500
 
+
+@project_ns.route('/<string:project_id>/users/<string:user_id>')
+class DeleteProjectUsers(Resource):
+
+    ### DELETE /projects/<project_id>/users ###
+
     @api.doc('remove_project_user')
-    @require_auth(keycloak_auth)
-    @require_organization_access('manage_project_users', PERMISSIONS, 'project_id', 'project-admin')
-    def delete(self, project_id):
+    def delete(self, project_id, user_id):
+
         """Remove a user from a project"""
+
+        #####################
+        ### ABSTRACT THIS ###
+        #####################
+
+        organisation_id = keycloak_auth.get_user_org()
+
+        if not organisation_id:
+            return {'error': 'User does not belong to any organisation'}, 400
+        else:
+            print(f"User's organisation_id: {organisation_id}")
+            with get_db_cursor() as cursor:
+                cursor.execute("""
+                    SELECT organisation_id 
+                    FROM projects 
+                    WHERE id = %s
+                """, (project_id,))
+                
+                project = cursor.fetchone()
+                
+                if not project:
+                    return {'error': 'Project not found or already deleted'}, 404
+                
+                project_org_id = project['organisation_id']
+                
+                if project_org_id != organisation_id:
+                    return {'error': 'User does not have permission to manage users on this project'}, 403
+
+        ####################
+        ### END ABSTRACT ###
+        ####################
+
         try:
-            data = request.get_json()
-            if not data:
-                return {'error': 'No JSON data provided'}, 400
+            # Check if user exists in Keycloak
+            user = keycloak_auth.get_user(user_id)
+            if not user:
+                return {'error': 'User not found in Keycloak'}, 404
+
+            # Remove user from all project roles
+            removed_roles = []
+            for role in ['project-admin', 'project-contributor', 'project-viewer']:
+                if keycloak_auth.user_has_attribute(user_id, role, project_id):
+                    success = keycloak_auth.remove_attribute_value(user_id, role, project_id)
+                    if success:
+                        removed_roles.append(role)
+                        print(f"Removed project_id {project_id} from role {role} for user {user_id}")
+                    else:
+                        return {'error': f'Failed to remove role {role}'}, 500
             
-            user_id = data.get('user_id')
-            role = data.get('role')  # 'project-admin', 'project-contributor', 'project-viewer'
-            
-            if not user_id or not role:
-                return {'error': 'Both user_id and role are required'}, 400
-            
-            if role not in ['project-admin', 'project-contributor', 'project-viewer']:
-                return {'error': 'Invalid role specified'}, 400
-            
-            # Remove attribute from user in Keycloak
-            if not keycloak_auth.remove_attribute_value(user_id, role, project_id):
-                return {'error': 'Failed to remove attribute from user in Keycloak'}, 500
-            
+            if not removed_roles:
+                return {'message': 'User was not associated with the project'}, 200
+
             return {
-                'message': f'User {user_id} removed from project {project_id} role {role}'
+                'message': 'User removed from project successfully',
+                'user_id': user_id,
+                'project_id': project_id,
+                'removed_roles': removed_roles
             }, 200
-            
+
         except Exception as e:
             return {'error': f'Failed to remove user from project: {str(e)}'}, 500
 
 
-###
+##########################
 ### STUDIES
-###
+##########################
+
 
 study_ns = api.namespace('studies', description='Study management endpoints')
 
 @study_ns.route('/')
 class StudyList(Resource):
-    @api.doc('SONG and FOLIO - Get All Studies')
-    @require_auth(keycloak_auth)
-    @require_organization_access('manage_project_users', PERMISSIONS, 'project_id', 'project-admin')
+    
+    ### GET /studies ###
 
+    @study_ns.doc('list_studies')
     def get(self):
-        """List studies based on user permissions
+
+        """List all studies (public access)"""
         
-        Query Parameters:
-        - deleted: true/false (default: false) - If true, include soft-deleted studies
-        """
+        try:
+            with get_db_cursor() as cursor:
+                cursor.execute("""
+                    SELECT *
+                    FROM studies 
+                    WHERE deleted_at IS NULL 
+                    ORDER BY name
+                """)
+                
+                studies = cursor.fetchall()
 
-        return
+                return studies
 
-   
+        except Exception as e:
+            return {'error': f'Database error: {str(e)}'}, 500
 
-@study_ns.route('/<string:study_id>')
-class Study(Resource):
-    @api.doc('SONG and FOLIO - Get Study')
-    def get(self, study_id):
-        """Get details of a specific study by ID"""
-        return
-    
-    @api.doc('SONG and FOLIO - Create Study')
+    ### POST /studies ###
+
+    @study_ns.doc('create_study')
+    @require_auth(keycloak_auth)
     def post(self):
-        """Create a new study"""
-        return
 
-    @api.doc('SONG and FOLIO - Delete Study')
-    def delete(self, study_id):
-        """Delete a study by ID"""
-        return
-    
-    @api.doc('SONG and FOLIO - Update Study')
-    def put(self, study_id):
-        """Update a study by ID"""
-        return
-
-    
-
+        """Create a new study (system-admin only)"""
         
+        try:
+            data = request.get_json()
+            if not data:
+                return {'error': 'No JSON data provided'}, 400
+            
+            name = data.get('name')
+            description = data.get('description')
+            
+            if not name:
+                return {'error': 'Study name is required'}, 400
 
+            with get_db_cursor() as cursor:
+                cursor.execute("""
+                    INSERT INTO studies (name, description)
+                    VALUES (%s, %s)
+                    RETURNING id, name, description, created_at
+                """, (name, description))
+                
+                new_study = cursor.fetchone()
+                
+                return {
+                    'message': 'Study created successfully',
+                    'study': new_study
+                }, 201
+                
+        except Exception as e:
+            if 'duplicate key value violates unique constraint' in str(e):
+                return {'error': f'Study with name "{name}" already exists'}, 409
+            return {'error': f'Database error: {str(e)}'}, 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
