@@ -1097,7 +1097,7 @@ class StudyList(Resource):
 @study_ns.route('/submit/<string:study_id>/')
 class SongSubmit(Resource):
     
-    ### POST /studies/submit/<study_id> ###
+    ### POST /studies/submit/<study_id>/ ###
 
     @study_ns.doc('submit_study')
     @require_auth(keycloak_auth)
@@ -1201,6 +1201,8 @@ class StudyAnalysisUpload(Resource):
         """Upload a file to an analysis in SCORE and MINIO (proxy endpoint)"""
 
         try:
+            print("Form keys:", request.form.keys())
+            print("Form data:", request.form)
             # Parse form data
             object_id = request.form.get('object_id')
             overwrite = request.form.get('overwrite', 'true').lower() == 'true'
@@ -1319,6 +1321,91 @@ class StudyAnalysisUpload(Resource):
         except Exception as e:
             return {'error': f'Failed to upload file: {str(e)}'}, 500
        
+@study_ns.route('/<string:study_id>/analysis/publish/<string:analysis_id>')
+class StudyAnalysisPublish(Resource):
+
+    ### POST /studies/<study_id>/analysis/publish/<analysis_id> ###
+
+    @study_ns.doc('publish_analysis')
+    @require_auth(keycloak_auth)
+    def post(self, study_id, analysis_id):
+
+        """Publish an analysis in SONG (proxy endpoint)"""
+        
+        print('here!')
+        
+        try:
+            # Get client token for SONG API
+            song_token = keycloak_auth.get_client_token()
+            if not song_token:
+                return {'error': 'Failed to authenticate with SONG service'}, 500
+
+            # Set up headers for SONG request
+            song_headers = {
+                'Authorization': f'Bearer {song_token}',
+                'Content-Type': 'application/json'
+            }
+
+            # Forward the publish request to SONG
+            song_publish_url = f"{song}/studies/{study_id}/analysis/publish/{analysis_id}"
+            song_response = requests.put(song_publish_url, headers=song_headers)
+
+            print(f"SONG publish response status: {song_response.status_code}")
+
+            # Forward SONG's response directly
+            try:
+                response_data = song_response.json()
+            except Exception:
+                response_data = {'message': song_response.text}
+
+            return response_data, song_response.status_code
+
+        except Exception as e:
+            return {'error': f'Failed to publish analysis: {str(e)}'}, 500
+
+
+@study_ns.route('/<string:study_id>/analysis/unpublish/<string:analysis_id>/')
+class StudyAnalysisUnpublish(Resource):
+    
+    ### POST /studies/<study_id>/analysis/unpublish/<analysis_id> ###
+
+    @study_ns.doc('unpublish_analysis')
+    @require_auth(keycloak_auth)
+    def post(self, study_id, analysis_id):
+
+        """Unpublish an analysis in SONG (proxy endpoint)"""
+        
+        print('here!')
+
+        try:
+            # Get client token for SONG API
+            song_token = keycloak_auth.get_client_token()
+            if not song_token:
+                return {'error': 'Failed to authenticate with SONG service'}, 500
+
+            # Set up headers for SONG request
+            song_headers = {
+                'Authorization': f'Bearer {song_token}',
+                'Content-Type': 'application/json'
+            }
+
+            # Forward the unpublish request to SONG
+            song_unpublish_url = f"{song}/studies/{study_id}/analysis/unpublish/{analysis_id}"
+            song_response = requests.put(song_unpublish_url, headers=song_headers)
+
+            print(f"SONG unpublish response status: {song_response.status_code}")
+
+            # Forward SONG's response directly
+            try:
+                response_data = song_response.json()
+            except Exception:
+                response_data = {'message': song_response.text}
+
+            return response_data, song_response.status_code
+
+        except Exception as e:
+            return {'error': f'Failed to unpublish analysis: {str(e)}'}, 500
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
