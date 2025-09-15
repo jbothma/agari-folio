@@ -7,6 +7,8 @@ import os
 import json
 from datetime import datetime, date
 from decimal import Decimal
+import requests
+
 
 # Custom JSON encoder to handle datetime and other types
 class CustomJSONEncoder(json.JSONEncoder):
@@ -21,6 +23,9 @@ class CustomJSONEncoder(json.JSONEncoder):
 
 app = Flask(__name__)
 app.json_encoder = CustomJSONEncoder
+
+song = os.getenv('OVERTURE_SONG', 'http://song.local')
+score = os.getenv('OVERTURE_SCORE', 'http://score.local')
 
 keycloak_auth = KeycloakAuth(
     keycloak_url=os.getenv('KEYCLOAK_URL', 'http://keycloak.local'),
@@ -1002,37 +1007,146 @@ class StudyList(Resource):
     @require_auth(keycloak_auth)
     def post(self):
 
-        """Create a new study (system-admin only)"""
+        """Create a new study"""
         
         try:
             data = request.get_json()
             if not data:
                 return {'error': 'No JSON data provided'}, 400
             
+            studyId = data.get('studyId')
             name = data.get('name')
             description = data.get('description')
+            projectId = data.get('projectId')
+            info = data.get('info')
             
+            if not studyId:
+                return {'error': 'StudyId is required'}, 400
             if not name:
                 return {'error': 'Study name is required'}, 400
+            if not projectId:
+                return {'error': 'Associated projectId is required'}, 400
+
+            ### CHECK IF STUDYID EXISTS IN SONG ###
+
+            print(f"Checking if studyId '{studyId}' exists in SONG before creating locally...")
+
+            song_token = keycloak_auth.get_client_token()
+            if not song_token:
+                return {'error': 'Failed to authenticate with SONG service'}, 500
+            else:
+                print("Successfully obtained SONG token")
+                print(f"SONG Token: {song_token}")
+
+
+            song_headers = {
+                'Authorization': f'Bearer {song_token}',
+                'Content-Type': 'application/json'
+            }
+            
+            song_check_url = f"{song}/studies/{studyId}"
+            song_response = requests.get(song_check_url, headers=song_headers)
+
+            print(f"SONG: {song_response.json()}")
+
+            if song_response.status_code == 200:
+                return {'error': f'Study with studyId "{studyId}" already exists in SONG'}, 200
+            elif song_response.status_code == 404:
+                print(f"StudyId '{studyId}' does not exist in SONG, proceeding to create locally...")
+            else:
+                return {'error': f'Error checking study in SONG: {song_response.status_code} - {song_response.text}'}, 500
+
+            ### CREATE STUDY IN SONG ###
+
+            song_create_url = f"{song}/studies/{studyId}/"
+            song_payload = {
+                'studyId': studyId,
+                'name': name,
+                'description': description,
+                'info': info or {}
+            }
+
+            song_response = requests.post(song_create_url, headers=song_headers, json=song_payload)
+
+            if song_response.status_code == 200:
+                print(f"Successfully created study in SONG: {song_response.json()}")
+            else:
+                return {'error': f"Failed to create study in SONG: {song_response.status_code} - {song_response.text}"}
+
+            ### CREATE STUDY LOCALLY ###
 
             with get_db_cursor() as cursor:
                 cursor.execute("""
-                    INSERT INTO studies (name, description)
-                    VALUES (%s, %s)
-                    RETURNING id, name, description, created_at
-                """, (name, description))
-                
+                    INSERT INTO studies (study_id, name, description, project_id)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING *
+                """, (studyId, name, description, projectId))
+
                 new_study = cursor.fetchone()
-                
+
                 return {
                     'message': 'Study created successfully',
                     'study': new_study
                 }, 201
-                
+           
         except Exception as e:
             if 'duplicate key value violates unique constraint' in str(e):
                 return {'error': f'Study with name "{name}" already exists'}, 409
             return {'error': f'Database error: {str(e)}'}, 500
+
+@study_ns.route('/submit/<string:study_id>')
+class StudySubmit(Resource):
+    
+    ### POST /studies/submit/<study_id> ###
+
+    @study_ns.doc('submit_study')
+    @require_auth(keycloak_auth)
+    def post(self, study_id):
+
+        """Submit a study to SONG"""
+
+        try:
+            with get_db_cursor() as cursor:
+                cursor.execute("""
+                    SELECT * 
+                    FROM studies 
+                    WHERE study_id = %s AND deleted_at IS NULL
+                """, (study_id,))
+                
+                study = cursor.fetchone()
+                
+                if not study:
+                    return {'error': 'Study not found or already deleted'}, 404
+
+            print(f"Submitting studyId '{study_id}' to SONG...")
+
+            song_token = keycloak_auth.get_client_token()
+            if not song_token:
+                return {'error': 'Failed to authenticate with SONG service'}, 500
+            else:
+                print("Successfully obtained SONG token")
+                print(f"SONG Token: {song_token}")
+
+            song_headers = {
+                'Authorization': f'Bearer {song_token}',
+                'Content-Type': 'application/json'
+            }
+            
+            song_submit_url = f"{song}/studies/{study_id}/submit"
+            song_response = requests.post(song_submit_url, headers=song_headers)
+
+            print(f"SONG Submission Response: {song_response.json()}")
+
+            if song_response.status_code == 200:
+                return {
+                    'message': f'Study "{study_id}" submitted to SONG successfully',
+                    'song_response': song_response.json()
+                }, 200
+            else:
+                return {'error': f'Failed to submit study to SONG: {song_response.status_code} - {song_response.text}'}, 500
+
+        except Exception as e:
+            return {'error': f'Error submitting study to SONG: {str(e)}'}, 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

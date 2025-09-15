@@ -104,7 +104,7 @@ Content-Type: application/json
 
 ###
 
-@pathogen_id = 30919090-a976-4d29-ba33-77b7f106481e
+@pathogen_id = 0683f0f6-04b3-4005-a078-383d0e3e88f2
 
 # @name get_pathogen
 GET {{folio}}/pathogens/{{pathogen_id}}
@@ -164,7 +164,7 @@ Content-Type: application/json
 
 ###
 
-@project_id = 33f59eb7-9d1c-438f-8e12-fe6a8117184e
+@project_id = 8772fbeb-5c94-41d6-8159-48290874378b
 
 ### @name get_project
 GET {{folio}}/projects/{{project_id}}
@@ -238,7 +238,7 @@ Authorization: Bearer {{token}}
 
 ###
 
-@study_id = study-001
+@study_id = study-002
 
 # @name create_study
 POST {{folio}}/studies
@@ -256,15 +256,27 @@ Content-Type: application/json
     }
 }
 
+### 
+
+# @name get_studies_in_song
+GET http://song.local/studies/all
+Authorization: Bearer {{token}}
+
+
+###
+
+# @name get_study_in_song
+GET http://song.local/studies/{{study_id}}
+Authorization: Bearer {{token}}
+
+###
 
 
 # ### 3.1c. GET STUDY ANALYSES
 # GET http://song.local/studies/{{study_id}}/analysis
 # Authorization: Bearer {{token}}
 
-# ### 3.1d. LIST STUDIES
-# GET http://song.local/studies/all
-# Authorization: Bearer {{token}}
+
 
 # ### 3.2a. SUBMIT ANALYSIS
 # # @name submitAnalysis

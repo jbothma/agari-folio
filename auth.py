@@ -58,6 +58,37 @@ class KeycloakAuth:
             print(f"Error getting admin token: {e}")
             return None
         
+    ### GET CLIENT TOKEN ###
+    
+    def get_client_token(self):
+        """
+        Get client credentials token for service-to-service authentication
+        Uses the same client_id and client_secret as the admin token but 
+        can be used for different purposes (like SONG API calls)
+        
+        Returns:
+            str: Access token or None if failed
+        """
+        try:
+            token_url = f"{self.keycloak_url}/realms/{self.realm}/protocol/openid-connect/token"
+            
+            data = {
+                'grant_type': 'client_credentials',
+                'client_id': self.client_id,
+                'client_secret': self.client_secret
+            }
+            
+            response = requests.post(token_url, data=data)
+            response.raise_for_status()
+            
+            token_data = response.json()
+            return token_data.get('access_token')
+            
+        except requests.RequestException as e:
+            print(f"Error getting client token: {e}")
+            return None
+        
+    ### HELPER METHODS ###
 
     def _user_has_attribute_value(self, user, attribute_name, attribute_value, exact_match=True):
         
