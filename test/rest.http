@@ -6,11 +6,11 @@
 @client_secret = VDyLEjGR3xDQvoQlrHq5AB6OwbW0Refc
 
 # @username = system.admin@agari.tech
-@username = owner@org1.ac.za
+# @username = owner@org1.ac.za
 # @username = owner@org2.ac.za
 # @username = org-admin@org1.ac.za
 # @username = org-admin@org2.ac.za
-# @username = test-user1@example.com
+@username = test-user1@example.com
 # @username = test-user2@example.com
 # @username = test-user3@example.com
 

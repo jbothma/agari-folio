@@ -3,6 +3,7 @@ import requests
 from functools import wraps
 from flask import request, jsonify
 from jwt.exceptions import InvalidTokenError, ExpiredSignatureError
+from permissions import PERMISSIONS
 
 class KeycloakAuth:
     def __init__(self, keycloak_url, realm, client_id, client_secret):
@@ -425,11 +426,6 @@ class KeycloakAuth:
         except requests.RequestException as e:
             print(f"Error removing attribute value: {e}")
             return False
-
-        
-
-    
-
     
 
 def require_auth(keycloak_auth):
@@ -494,202 +490,120 @@ def extract_user_info(token_payload):
         'is_authenticated': True,
     }
 
-    
-    
-    
-    
-    
-    # def get_users_by_organization(self, organization_id):
-    #     """
-    #     Get all users belonging to a specific organization
-        
-    #     Args:
-    #         organization_id (str): The organization ID to search for
-            
-    #     Returns:
-    #         list: List of users in the organization
-    #     """
-    #     return self.get_users_by_attribute('organisation_id', organization_id)
-    
-    # def get_users_by_role(self, role_name):
-    #     """
-    #     Get all users with a specific role
-        
-    #     Args:
-    #         role_name (str): The role name to search for
-            
-    #     Returns:
-    #         list: List of users with simplified format (user_id, username, organisation_id, roles, attributes)
-    #     """
-    #     admin_token = self.get_admin_token()
-    #     if not admin_token:
-    #         return []
-        
-    #     try:
-    #         # Get role members endpoint
-    #         role_users_url = f"{self.keycloak_url}/admin/realms/{self.realm}/roles/{role_name}/users"
-            
-    #         headers = {
-    #             'Authorization': f'Bearer {admin_token}',
-    #             'Content-Type': 'application/json'
-    #         }
-            
-    #         response = requests.get(role_users_url, headers=headers)
-    #         response.raise_for_status()
-            
-    #         users = response.json()
-            
-    #         # Format users similar to whoami response
-    #         formatted_users = []
-    #         for user in users:
-    #             user_data = self._format_user_data(user)
-    #             user_data['roles'] = [role_name]  # Add the specific role we searched for
-    #             formatted_users.append(user_data)
-            
-    #         return formatted_users
-            
-    #     except requests.RequestException as e:
-    #         print(f"Error getting users by role: {e}")
-    #         return []
 
-    
+def user_has_permission(user_info, permission_name, resource_type=None, resource_id=None, parent_project_id=None):
+    """
+    Unified permission checking function that handles all access control logic (roles and attribute-based only).
+    Organization checks are not performed here.
+    Args:
+        user_info (dict): User information from JWT token
+        permission_name (str): The permission to check (e.g., 'edit_project')
+        resource_type (str): Optional - 'project' or 'study' for resource-specific checks
+        resource_id (str): Optional - specific resource ID for attribute-based checks
+    Returns:
+        tuple: (has_permission: bool, access_details: dict)
+    """
+    user_roles = user_info.get('roles', [])
+    user_id = user_info.get('user_id')
+    access_details = {
+        'checks_performed': [],
+        'access_granted_by': None,
+        'reason': None,
+        'required_roles': PERMISSIONS.get(permission_name, []),
+        'attribute_checks': []
+    }
 
+    required_roles = PERMISSIONS.get(permission_name, [])
+    if not required_roles:
+        access_details['reason'] = f'Permission "{permission_name}" not defined'
+        access_details['checks_performed'].append('permission_definition_check')
+        return False, access_details
 
-# def user_has_permission(user_info, permission_name, permissions_dict, resource_type=None, resource_id=None, keycloak_auth=None):
-#     """
-#     Unified permission checking function that handles all access control logic
-    
-#     Args:
-#         user_info (dict): User information from JWT token
-#         permission_name (str): The permission to check (e.g., 'edit_project')
-#         permissions_dict (dict): The PERMISSIONS configuration
-#         resource_type (str): Optional - 'project' or 'study' for resource-specific checks
-#         resource_id (str): Optional - specific resource ID for attribute-based checks
-#         keycloak_auth (KeycloakAuth): Optional - for attribute checking
-        
-#     Returns:
-#         tuple: (has_permission: bool, access_details: dict)
-#     """
-#     user_org_id = user_info.get('organisation_id')
-#     user_roles = user_info.get('roles', [])
-#     user_id = user_info.get('user_id')
-    
-#     # Initialize detailed response
-#     access_details = {
-#         'checks_performed': [],
-#         'access_granted_by': None,
-#         'reason': None,
-#         'required_roles': permissions_dict.get(permission_name, []),
-#         'attribute_checks': []
-#     }
-    
-#     # Get required roles for this permission
-#     required_roles = permissions_dict.get(permission_name, [])
-#     if not required_roles:
-#         access_details['reason'] = f'Permission "{permission_name}" not defined'
-#         access_details['checks_performed'].append('permission_definition_check')
-#         return False, access_details
-    
-#     # 1. Check if user is system admin (bypasses all restrictions)
-#     access_details['checks_performed'].append('system_admin_check')
-#     if 'system-admin' in user_roles:
-#         access_details['access_granted_by'] = 'system_admin_role'
-#         access_details['reason'] = 'User has system-admin role'
-#         return True, access_details
-    
-#     # Get resource organization if resource info provided
-#     resource_org_id = None
-#     if resource_type and resource_id:
-#         from database import get_db_cursor
-#         try:
-#             with get_db_cursor() as cursor:
-#                 if resource_type == 'project':
-#                     cursor.execute("SELECT organisation_id FROM projects WHERE id = %s", (resource_id,))
-#                 elif resource_type == 'study':
-#                     cursor.execute("""
-#                         SELECT p.organisation_id 
-#                         FROM studies s 
-#                         JOIN projects p ON s.project_id = p.id 
-#                         WHERE s.id = %s
-#                     """, (resource_id,))
-                
-#                 result = cursor.fetchone()
-#                 if result:
-#                     resource_org_id = result['organisation_id']
-#         except:
-#             pass  # If we can't get resource org, continue without it
-    
-#     # 2. Check standard organization-scoped roles
-#     access_details['checks_performed'].append('organization_role_check')
-#     for required_role in required_roles:
-#         if not required_role.startswith('attr-'):  # Skip attribute-based roles for now
-#             if required_role in user_roles:
-#                 # User has the role, now check organization scope
-#                 if resource_org_id and user_org_id != resource_org_id:
-#                     access_details['reason'] = f'User has role "{required_role}" but belongs to different organization'
-#                     continue
-#                 else:
-#                     access_details['access_granted_by'] = f'organization_role:{required_role}'
-#                     access_details['reason'] = f'User has role "{required_role}" and same organization'
-#                     return True, access_details
-    
-#     # 3. Check attribute-based roles (attr-project-admin, attr-study-contributor, etc.)
-#     if resource_id and user_id:
-#         access_details['checks_performed'].append('attribute_role_check')
-        
-#         for required_role in required_roles:
-#             if required_role.startswith('attr-'):
-#                 # Extract attribute name from role (e.g., 'attr-project-admin' -> 'project-admin')
-#                 attribute_name = required_role[5:]  # Remove 'attr-' prefix
-                
-#                 access_details['attribute_checks'].append({
-#                     'attribute_name': attribute_name,
-#                     'resource_id': resource_id,
-#                     'checked': True
-#                 })
-                
-#                 try:
-#                     # Fast path: Check JWT attributes first
-#                     user_attributes = user_info.get('attributes', {})
-#                     has_attribute = False
-                    
-#                     if attribute_name in user_attributes:
-#                         attr_values = user_attributes[attribute_name]
-#                         if isinstance(attr_values, list):
-#                             has_attribute = resource_id in attr_values
-#                         else:
-#                             has_attribute = str(attr_values) == resource_id
-                        
-#                         access_details['attribute_checks'][-1]['jwt_check'] = 'found' if has_attribute else 'not_found'
-#                     else:
-#                         access_details['attribute_checks'][-1]['jwt_check'] = 'attribute_not_in_jwt'
-                    
-#                     # If not found in JWT and we have keycloak_auth, fallback to API
-#                     if not has_attribute and keycloak_auth:
-#                         has_attribute = keycloak_auth.user_has_attribute(user_id, attribute_name, resource_id)
-#                         access_details['attribute_checks'][-1]['api_fallback'] = 'checked'
-                    
-#                     if has_attribute:
-#                         access_details['access_granted_by'] = f'attribute:{attribute_name}'
-#                         access_details['reason'] = f'User has attribute "{attribute_name}" for resource {resource_id}'
-#                         return True, access_details
-#                     else:
-#                         access_details['attribute_checks'][-1]['result'] = 'not_found'
-                        
-#                 except Exception as e:
-#                     access_details['attribute_checks'][-1]['result'] = f'error: {str(e)}'
-    
-#     # 4. If no access granted
-#     access_details['reason'] = 'User does not have required permissions'
-#     return False, access_details
+    # 1. Check if user is system admin (bypasses all restrictions)
+    access_details['checks_performed'].append('system_admin_check')
+    if 'system-admin' in user_roles:
+        access_details['access_granted_by'] = 'system_admin_role'
+        access_details['reason'] = 'User has system-admin role'
+        return True, access_details
 
+    # 2. Check standard roles (no org check)
+    access_details['checks_performed'].append('role_check')
+    for required_role in required_roles:
+        if not required_role.startswith('attr-'):
+            if required_role in user_roles:
+                access_details['access_granted_by'] = f'role:{required_role}'
+                access_details['reason'] = f'User has role "{required_role}"'
+                return True, access_details
 
-# def check_user_permission(user_info, permission_name, permissions_dict):
-#     """
-#     Simplified wrapper for backwards compatibility
-#     Only checks roles, not attributes or resource-specific access
-#     """
-#     has_permission, _ = user_has_permission(user_info, permission_name, permissions_dict)
-#     return has_permission
+    # 3. Check attribute-based roles (attr-project-admin, attr-study-contributor, etc.)
+    if resource_id and user_id:
+        access_details['checks_performed'].append('attribute_role_check')
+        for required_role in required_roles:
+            if required_role.startswith('attr-'):
+                attribute_name = required_role[5:]
+                access_details['attribute_checks'].append({
+                    'attribute_name': attribute_name,
+                    'resource_id': resource_id,
+                    'checked': True
+                })
+                user_attributes = user_info.get('attributes', {})
+                has_attribute = False
+                # First, check for the attribute on the resource itself
+                if attribute_name in user_attributes:
+                    attr_values = user_attributes[attribute_name]
+                    if isinstance(attr_values, list):
+                        has_attribute = resource_id in attr_values
+                    else:
+                        has_attribute = str(attr_values) == resource_id
+                    access_details['attribute_checks'][-1]['jwt_check'] = 'found' if has_attribute else 'not_found'
+                else:
+                    access_details['attribute_checks'][-1]['jwt_check'] = 'attribute_not_in_jwt'
+                # If not found and this is a study, check for project-level attribute
+                if not has_attribute and resource_type == 'study' and parent_project_id:
+                    # Map study attribute to project attribute (e.g., study-admin -> project-admin)
+                    if attribute_name.startswith('study-'):
+                        project_attr = 'project-' + attribute_name[len('study-'):]
+                        access_details['attribute_checks'][-1]['project_attribute_checked'] = project_attr
+                        if project_attr in user_attributes:
+                            proj_attr_values = user_attributes[project_attr]
+                            if isinstance(proj_attr_values, list):
+                                has_attribute = parent_project_id in proj_attr_values
+                            else:
+                                has_attribute = str(proj_attr_values) == parent_project_id
+                            access_details['attribute_checks'][-1]['project_jwt_check'] = 'found' if has_attribute else 'not_found'
+                        else:
+                            access_details['attribute_checks'][-1]['project_jwt_check'] = 'attribute_not_in_jwt'
+                if has_attribute:
+                    access_details['access_granted_by'] = f'attribute:{attribute_name}'
+                    if resource_type == 'study' and parent_project_id and not (attribute_name in user_attributes and (resource_id in user_attributes.get(attribute_name, []) or str(user_attributes.get(attribute_name)) == resource_id)):
+                        access_details['reason'] = f'User has project attribute for parent project {parent_project_id}'
+                    else:
+                        access_details['reason'] = f'User has attribute "{attribute_name}" for resource {resource_id}'
+                    return True, access_details
+                else:
+                    access_details['attribute_checks'][-1]['result'] = 'not_found'
 
+    # 4. If no access granted
+    access_details['reason'] = 'User does not have required permissions'
+    return False, access_details
 
+def require_permission(permission_name, resource_type=None, resource_id=None, parent_project_id=None):
+
+    """Decorator to require specific permission for a route"""
+
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            user_info = extract_user_info(request.user)
+            has_perm, details = user_has_permission(
+                user_info,
+                permission_name,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                parent_project_id=parent_project_id
+            )
+            if not has_perm:
+                return {'error': 'Permission denied', 'details': details}, 403
+            return f(*args, **kwargs)
+        return wrapper
+    return decorator

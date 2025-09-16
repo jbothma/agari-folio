@@ -1,6 +1,6 @@
 from flask import Flask,request
 from flask_restx import Api, Resource
-from auth import KeycloakAuth, require_auth, extract_user_info
+from auth import KeycloakAuth, require_auth, extract_user_info, require_permission
 from permissions import PERMISSIONS
 from database import get_db_cursor, test_connection
 import os
@@ -192,6 +192,7 @@ class PathogenList(Resource):
 
     @pathogen_ns.doc('create_pathogen')
     @require_auth(keycloak_auth)
+    @require_permission('create_pathogen')
     def post(self):
 
         """Create a new pathogen (system-admin only)"""
