@@ -1,4 +1,8 @@
+
+
 # Agari-Folio
+
+![Overture Genomics Data Stack](overture-stack.svg)
 
 Agari-Folio is a core service in the Overture Genomics Data stack, providing robust project management and granular role-based access control for genomics data workflows.
 
