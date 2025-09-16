@@ -65,7 +65,7 @@ Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-    "permission": "view_org_private_projects",
+    "permission": "create_project",
     "resource_type": "project",
     "resource_id": "80bd4fd2-10e3-4104-abe2-713dfdd92bfa"
 }
@@ -104,9 +104,9 @@ Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-    "name": "Cholera3",
-    "description": "Cholera Virus3",
-    "scientific_name": "Vibrio cholerae3"
+    "name": "Cholera4",
+    "description": "Cholera Virus4",
+    "scientific_name": "Vibrio cholerae4"
 }
 
 ###
@@ -222,8 +222,8 @@ Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-    "user_id": "4be1a37d-d3b4-497c-9b62-1b3c07796dbd",
-    "role": "project-admin"
+    "user_id": "282dd9ee-ad7e-4580-9677-fa37d7ba6435",
+    "role": "project-contributor"
 }
 
 ###
@@ -245,7 +245,7 @@ Authorization: Bearer {{token}}
 
 ###
 
-@study_id = study-002
+@study_id = study-003
 
 # @name create_study
 POST {{folio}}/studies
@@ -284,7 +284,7 @@ Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-  "studyId": "study-002",
+  "studyId": "study-003",
   "analysisId": "analysis001",
   "analysisType": {
     "name": "sequencingRead",
@@ -304,7 +304,7 @@ Content-Type: application/json
         "tumourNormalDesignation": "Normal"
       },
       "donor": {
-        "studyId": "study-002",
+        "studyId": "study-003",
         "donorId": "D001",
         "submitterDonorId": "D001",
         "gender": "Female"
