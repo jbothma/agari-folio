@@ -587,14 +587,20 @@ def user_has_permission(user_info, permission_name, resource_type=None, resource
     access_details['reason'] = 'User does not have required permissions'
     return False, access_details
 
-def require_permission(permission_name, resource_type=None, resource_id=None, parent_project_id=None):
-
-    """Decorator to require specific permission for a route"""
-
+def require_permission(permission_name, resource_type=None, resource_id_arg=None, parent_project_id_arg=None):
     def decorator(f):
         @wraps(f)
         def wrapper(*args, **kwargs):
             user_info = extract_user_info(request.user)
+            # For POST /studies, resource_id and parent_project_id come from the request body
+            if resource_type == 'study' and request.method == 'POST':
+                data = request.get_json() or {}
+                resource_id = data.get('studyId')
+                parent_project_id = data.get('projectId')
+            else:
+                resource_id = kwargs.get(resource_id_arg) if resource_id_arg else None
+                parent_project_id = kwargs.get(parent_project_id_arg) if parent_project_id_arg else None
+
             has_perm, details = user_has_permission(
                 user_info,
                 permission_name,

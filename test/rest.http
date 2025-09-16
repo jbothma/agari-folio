@@ -6,11 +6,11 @@
 @client_secret = VDyLEjGR3xDQvoQlrHq5AB6OwbW0Refc
 
 # @username = system.admin@agari.tech
-# @username = owner@org1.ac.za
+@username = owner@org1.ac.za
 # @username = owner@org2.ac.za
 # @username = org-admin@org1.ac.za
 # @username = org-admin@org2.ac.za
-@username = test-user1@example.com
+# @username = test-user1@example.com
 # @username = test-user2@example.com
 # @username = test-user3@example.com
 
@@ -73,9 +73,16 @@ Content-Type: application/json
 
 ###
 
-# @name check_permission
-GET {{folio}}/info/permissions/check/view_org_private_projects
+# @name permission_check
+POST {{folio}}/info/permissions/check
 Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "permission": "view_org_private_projects",
+    "resource_type": "project",
+    "resource_id": "80bd4fd2-10e3-4104-abe2-713dfdd92bfa"
+}
 
 ##########################
 ### PATHOGENS
@@ -97,9 +104,9 @@ Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-    "name": "Cholera2",
-    "description": "Cholera Virus2",
-    "scientific_name": "Vibrio cholerae2"
+    "name": "Cholera3",
+    "description": "Cholera Virus3",
+    "scientific_name": "Vibrio cholerae3"
 }
 
 ###
@@ -156,8 +163,8 @@ Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-    "name": "Cholera Project",
-    "description": "Project description",
+    "name": "Cholera Project2",
+    "description": "Project description2",
     "pathogen_id": "{{pathogen_id}}",
     "privacy": "public"
 }
@@ -178,7 +185,7 @@ Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-    "privacy": "public"
+    "privacy": "private"
 }
 
 ###
@@ -215,13 +222,13 @@ Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-    "user_id": "282dd9ee-ad7e-4580-9677-fa37d7ba6435",
-    "role": "project-contributor"
+    "user_id": "4be1a37d-d3b4-497c-9b62-1b3c07796dbd",
+    "role": "project-admin"
 }
 
 ###
 
-@user_id = 282dd9ee-ad7e-4580-9677-fa37d7ba6435
+@user_id = 638e2410-c4cf-4854-8258-d600ac289bcc
 
 # @name delete_project_users
 DELETE {{folio}}/projects/{{project_id}}/users/{{user_id}}
@@ -238,7 +245,7 @@ Authorization: Bearer {{token}}
 
 ###
 
-@study_id = study-001
+@study_id = study-002
 
 # @name create_study
 POST {{folio}}/studies
@@ -277,7 +284,7 @@ Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-  "studyId": "study-001",
+  "studyId": "study-002",
   "analysisId": "analysis001",
   "analysisType": {
     "name": "sequencingRead",
@@ -297,7 +304,7 @@ Content-Type: application/json
         "tumourNormalDesignation": "Normal"
       },
       "donor": {
-        "studyId": "study-001",
+        "studyId": "study-002",
         "donorId": "D001",
         "submitterDonorId": "D001",
         "gender": "Female"
@@ -323,13 +330,7 @@ Content-Type: application/json
 
 ###
 
-@analysis_id = 6920dac0-52c5-42be-a0da-c052c542be33
-
-# @name get_study_analyses_by_id
-GET http://song.local/studies/{{study_id}}/analysis/{{analysis_id}}
-Authorization: Bearer {{token}}
-
-###
+@analysis_id = f1646e21-6c01-4f09-a46e-216c01af09d6
 
 # @name list_study_analyses
 GET http://song.local/studies/{{study_id}}/analysis?analysisStates=PUBLISHED,UNPUBLISHED
@@ -337,14 +338,12 @@ Authorization: Bearer {{token}}
 
 ###
 
-@object_id_from_analysis = baa3143a-4d69-5d4a-975f-b0ae20216a91
+@object_id_from_analysis = 14e5f58a-73ed-5359-8101-e3ae6d544fbc
 
 # @name upload_analysis_file_curl
-curl -X POST {{folio}}/studies/study-001/analysis/{{object_id_from_analysis}}/upload -H "Authorization: Bearer {{token}}" -F "object_id=baa3143a-4d69-5d4a-975f-b0ae20216a91" -F "overwrite=true" -F "file=@/home/dimee/Work/OpenUp/SANBI/agari-folio/test/test_data.fasta"
+curl -X POST http://song.local/studies/study-002/analysis/f1646e21-6c01-4f09-a46e-216c01af09d6/upload -H "Authorization: Bearer {{token}}" -F "object_id=14e5f58a-73ed-5359-8101-e3ae6d544fbc" -F "overwrite=true" -F "file=@/home/dimee/Work/OpenUp/SANBI/agari-folio/test/test_data.fasta"
 
 ###
-
-@analysis_id = 6920dac0-52c5-42be-a0da-c052c542be33
 
 # @name publish_analysis
 POST {{folio}}/studies/{{study_id}}/analysis/publish/{{analysis_id}}

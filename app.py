@@ -1,6 +1,6 @@
 from flask import Flask,request
 from flask_restx import Api, Resource
-from auth import KeycloakAuth, require_auth, extract_user_info, require_permission
+from auth import KeycloakAuth, require_auth, extract_user_info, require_permission, user_has_permission
 from permissions import PERMISSIONS
 from database import get_db_cursor, test_connection
 import os
@@ -123,20 +123,43 @@ class PermissionsCheckResource(Resource):
     @api.doc('check_permission_for_resource')
     @require_auth(keycloak_auth)
     def post(self):
+        """
+        Check if the current user has a specific permission for a resource
 
-        """Check if the current user has a specific permission for a resource
-        
         Request Body:
         {
             "resource_type": "project|study",
             "resource_id": "<uuid>",
-            "permission": "edit_project|delete_project|etc"
+            "permission": "edit_project|delete_project|etc",
+            "parent_project_id": "<uuid>"  # Optional, for study checks
         }
-        
+
         Returns detailed permission check information for debugging
         """
+        try:
+            data = request.get_json()
+            if not data:
+                return {'error': 'No JSON data provided'}, 400
 
-        return
+            resource_type = data.get('resource_type')
+            resource_id = data.get('resource_id')
+            permission = data.get('permission')
+            parent_project_id = data.get('parent_project_id')
+
+            user_info = extract_user_info(request.user)
+            has_perm, details = user_has_permission(
+                user_info,
+                permission,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                parent_project_id=parent_project_id
+            )
+            return {
+                'has_permission': has_perm,
+                'details': details
+            }
+        except Exception as e:
+            return {'error': f'Failed to check permission: {str(e)}'}, 500
 
 
 ##########################
@@ -262,6 +285,7 @@ class Pathogen(Resource):
 
     @pathogen_ns.doc('delete_pathogen')
     @require_auth(keycloak_auth)
+    @require_permission('create_pathogen')
     def delete(self, pathogen_id):
 
         """Delete a pathogen by ID (system-admin only)
@@ -318,6 +342,7 @@ class Pathogen(Resource):
 
     @pathogen_ns.doc('update_pathogen')
     @require_auth(keycloak_auth)
+    @require_permission('create_pathogen')
     def put(self, pathogen_id):
 
         """Update a pathogen by ID (system-admin only)"""
@@ -367,6 +392,7 @@ class PathogenRestore(Resource):
 
     @pathogen_ns.doc('restore_pathogen')
     @require_auth(keycloak_auth)
+    @require_permission('create_pathogen')
     def post(self, pathogen_id):
 
         """Restore a soft-deleted pathogen (system-admin only)"""
@@ -420,7 +446,7 @@ class ProjectList(Resource):
                     
                 if organisation_id is not None:
                     cursor.execute("""
-                        SELECT id, name, organisation_id, privacy, created_at
+                        SELECT *
                         FROM projects
                         WHERE deleted_at IS NULL
                         AND (privacy = 'public' OR organisation_id = %s)
@@ -429,7 +455,7 @@ class ProjectList(Resource):
                     
                 else:
                     cursor.execute("""
-                        SELECT id, name, organisation_id, privacy, created_at
+                        SELECT *
                         FROM projects
                         WHERE deleted_at IS NULL
                         AND privacy = 'public'
@@ -450,6 +476,7 @@ class ProjectList(Resource):
 
     @api.doc('create_project')
     @require_auth(keycloak_auth)
+    @require_permission('create_project')
     def post(self):
         
         """Create a new project"""
@@ -544,6 +571,7 @@ class Project(Resource):
         
     @api.doc('update_project')
     @require_auth(keycloak_auth)
+    @require_permission('edit_projects')
     def put(self, project_id):
 
         """Update a project by ID user permissions and organisation scope"""
@@ -632,6 +660,7 @@ class Project(Resource):
 
     @api.doc('delete_project')
     @require_auth(keycloak_auth)
+    @require_permission('delete_projects')
     def delete(self, project_id):
 
         """Delete a project by ID user permissions and organisation scope
@@ -713,6 +742,8 @@ class ProjectRestore(Resource):
     ### POST /projects/<project_id>/restore ###
     
     @api.doc('restore_project')
+    @require_auth(keycloak_auth)
+    @require_permission('create_projects')
     def post(self, project_id):
 
         """Restore a soft-deleted project (system-admin only)"""
@@ -771,6 +802,7 @@ class ProjectUsers(Resource):
     
     @api.doc('list_project_users')
     @require_auth(keycloak_auth)
+    @require_permission('view_project_users', resource_type='project', resource_id_arg='project_id')
     def get(self, project_id):
 
         """List users associated with a project"""
@@ -816,6 +848,7 @@ class ProjectUsers(Resource):
     
     @api.doc('add_project_user')
     @require_auth(keycloak_auth)
+    @require_permission('manage_project_users', resource_type='project', resource_id_arg='project_id')
     def post(self, project_id):
 
         """Add a user to a project with a specific role"""
@@ -903,6 +936,8 @@ class DeleteProjectUsers(Resource):
     ### DELETE /projects/<project_id>/users ###
 
     @api.doc('remove_project_user')
+    @require_auth(keycloak_auth)
+    @require_permission('manage_project_users', resource_type='project', resource_id_arg='project_id')
     def delete(self, project_id, user_id):
 
         """Remove a user from a project"""
@@ -1006,10 +1041,9 @@ class StudyList(Resource):
 
     @study_ns.doc('create_study')
     @require_auth(keycloak_auth)
+    @require_permission('create_study', resource_type='study')
     def post(self):
-
         """Create a new study"""
-        
         try:
             data = request.get_json()
             if not data:
@@ -1027,19 +1061,37 @@ class StudyList(Resource):
                 return {'error': 'Study name is required'}, 400
             if not projectId:
                 return {'error': 'Associated projectId is required'}, 400
-
+    
+            # --- Organisation check (reuse pattern) ---
+            organisation_id = keycloak_auth.get_user_org()
+            if not organisation_id:
+                return {'error': 'User does not belong to any organisation'}, 400
+            else:
+                print(f"User's organisation_id: {organisation_id}")
+                with get_db_cursor() as cursor:
+                    cursor.execute("""
+                        SELECT organisation_id 
+                        FROM projects 
+                        WHERE id = %s
+                    """, (projectId,))
+                    project = cursor.fetchone()
+                    if not project:
+                        return {'error': 'Project not found or already deleted'}, 404
+                    project_org_id = project['organisation_id']
+                    if project_org_id != organisation_id:
+                        return {'error': 'User does not have permission to create studies in this project'}, 403
+            # --- End organisation check ---
+    
             ### CHECK IF STUDYID EXISTS IN SONG ###
-
             print(f"Checking if studyId '{studyId}' exists in SONG before creating locally...")
-
+    
             song_token = keycloak_auth.get_client_token()
             if not song_token:
                 return {'error': 'Failed to authenticate with SONG service'}, 500
             else:
                 print("Successfully obtained SONG token")
                 print(f"SONG Token: {song_token}")
-
-
+    
             song_headers = {
                 'Authorization': f'Bearer {song_token}',
                 'Content-Type': 'application/json'
@@ -1047,18 +1099,17 @@ class StudyList(Resource):
             
             song_check_url = f"{song}/studies/{studyId}"
             song_response = requests.get(song_check_url, headers=song_headers)
-
+    
             print(f"SONG: {song_response.json()}")
-
+    
             if song_response.status_code == 200:
                 return {'error': f'Study with studyId "{studyId}" already exists in SONG'}, 200
             elif song_response.status_code == 404:
                 print(f"StudyId '{studyId}' does not exist in SONG, proceeding to create locally...")
             else:
                 return {'error': f'Error checking study in SONG: {song_response.status_code} - {song_response.text}'}, 500
-
+    
             ### CREATE STUDY IN SONG ###
-
             song_create_url = f"{song}/studies/{studyId}/"
             song_payload = {
                 'studyId': studyId,
@@ -1066,30 +1117,29 @@ class StudyList(Resource):
                 'description': description,
                 'info': info or {}
             }
-
+    
             song_response = requests.post(song_create_url, headers=song_headers, json=song_payload)
-
+    
             if song_response.status_code == 200:
                 print(f"Successfully created study in SONG: {song_response.json()}")
             else:
                 return {'error': f"Failed to create study in SONG: {song_response.status_code} - {song_response.text}"}
-
+    
             ### CREATE STUDY LOCALLY ###
-
             with get_db_cursor() as cursor:
                 cursor.execute("""
                     INSERT INTO studies (study_id, name, description, project_id)
                     VALUES (%s, %s, %s, %s)
                     RETURNING *
                 """, (studyId, name, description, projectId))
-
+    
                 new_study = cursor.fetchone()
-
+    
                 return {
                     'message': 'Study created successfully',
                     'study': new_study
                 }, 201
-           
+    
         except Exception as e:
             if 'duplicate key value violates unique constraint' in str(e):
                 return {'error': f'Study with name "{name}" already exists'}, 409
@@ -1102,6 +1152,7 @@ class SongSubmit(Resource):
 
     @study_ns.doc('submit_study')
     @require_auth(keycloak_auth)
+    @require_permission('submit_to_study', resource_type='study')
     def post(self, study_id):
 
         """Submit an analysis to SONG (proxy endpoint)"""
@@ -1197,6 +1248,7 @@ class StudyAnalysisUpload(Resource):
 
     @study_ns.doc('upload_analysis_file')
     @require_auth(keycloak_auth)
+    @require_permission('submit_to_study', resource_type='study')
     def post(self, study_id, analysis_id):
 
         """Upload a file to an analysis in SCORE and MINIO (proxy endpoint)"""
