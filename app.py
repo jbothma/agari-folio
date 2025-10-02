@@ -1256,8 +1256,8 @@ class StudyAnalysisUpload(Resource):
         """Upload a file to an analysis in SCORE and MINIO (proxy endpoint)"""
 
         try:
-            print("Form keys:", request.form.keys())
-            print("Form data:", request.form)
+            app.logger.info("Form keys:", request.form.keys())
+            app.logger.info("Form data:", request.form)
             # Parse form data
             object_id = request.form.get('object_id')
             overwrite = request.form.get('overwrite', 'true').lower() == 'true'
