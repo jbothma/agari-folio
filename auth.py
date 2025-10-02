@@ -1,7 +1,7 @@
 import jwt
 import requests
 from functools import wraps
-from flask import request, jsonify
+from flask import request, jsonify, current_app
 from jwt.exceptions import InvalidTokenError, ExpiredSignatureError
 from permissions import PERMISSIONS
 
@@ -44,7 +44,7 @@ class KeycloakAuth:
         """Get admin access token for Keycloak API calls using service account"""
         try:
             token_url = f"{self.keycloak_url}/realms/{self.realm}/protocol/openid-connect/token"
-            
+
             data = {
                 'grant_type': 'client_credentials',
                 'client_id': self.client_id,
@@ -72,7 +72,13 @@ class KeycloakAuth:
         """
         try:
             token_url = f"{self.keycloak_url}/realms/{self.realm}/protocol/openid-connect/token"
-            
+
+            current_app.logger.info(f"Token info\n \
+                URL: {token_url}\n \
+                Client ID: {self.client_id}\n \
+                Client Secret: {self.client_secret}\n \
+                Public key: {self.public_key}")
+
             data = {
                 'grant_type': 'client_credentials',
                 'client_id': self.client_id,
@@ -86,7 +92,7 @@ class KeycloakAuth:
             return token_data.get('access_token')
             
         except requests.RequestException as e:
-            print(f"Error getting client token: {e}")
+            current_app.logger.error(f"Error getting client token: {e}")
             return None
         
     ### HELPER METHODS ###
