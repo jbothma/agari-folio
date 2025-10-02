@@ -1068,7 +1068,7 @@ class StudyList(Resource):
             if not organisation_id:
                 return {'error': 'User does not belong to any organisation'}, 400
             else:
-                print(f"User's organisation_id: {organisation_id}")
+                app.logger.info(f"User's organisation_id: {organisation_id}")
                 with get_db_cursor() as cursor:
                     cursor.execute("""
                         SELECT organisation_id 
@@ -1084,13 +1084,13 @@ class StudyList(Resource):
             # --- End organisation check ---
     
             ### CHECK IF STUDYID EXISTS IN SONG ###
-            print(f"Checking if studyId '{studyId}' exists in SONG before creating locally...")
+            app.logger.info(f"Checking if studyId '{studyId}' exists in SONG before creating locally...")
     
             song_token = keycloak_auth.get_client_token()
             if not song_token:
                 return {'error': 'Failed to authenticate with SONG service'}, 500
             else:
-                print("Successfully obtained SONG token")
+                app.logger.info("Successfully obtained SONG token")
                 print(f"SONG Token: {song_token}")
     
             song_headers = {
@@ -1099,9 +1099,10 @@ class StudyList(Resource):
             }
             
             song_check_url = f"{song}/studies/{studyId}"
+            app.logger.info(f"Checking SONG for existing studyId at {song_check_url} ...")
             song_response = requests.get(song_check_url, headers=song_headers)
     
-            print(f"SONG: {song_response.json()}")
+            app.logger.info(f"SONG: {song_response.json()}")
     
             if song_response.status_code == 200:
                 return {'error': f'Study with studyId "{studyId}" already exists in SONG'}, 200
