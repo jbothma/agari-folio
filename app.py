@@ -1286,7 +1286,7 @@ class StudyAnalysisUpload(Resource):
             score_token = keycloak_auth.get_client_token()
             if not score_token:
                 return {'error': 'Failed to authenticate with SCORE service'}, 500
-            app.logger.info(f"Score toke {score_token}")
+
             score_headers = {
                 'Authorization': f'Bearer {score_token}',
                 'Content-Type': 'application/x-www-form-urlencoded'
@@ -1299,9 +1299,9 @@ class StudyAnalysisUpload(Resource):
                 'md5': file_md5,
                 'overwrite': overwrite
             }
-            
+            app.logger.info(f"Score URL {init_upload_url}")
             init_response = requests.post(init_upload_url, headers=score_headers, data=init_data)
-            app.logger.info(f"Score upload response {init_response.status_code}")
+            app.logger.info(f"Score upload response: {init_response}")
             if init_response.status_code != 200:
                 return {'error': f'Failed to initialize upload: {init_response.status_code} - {init_response.text}'}, 500
                 
