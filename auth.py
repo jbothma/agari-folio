@@ -44,7 +44,6 @@ class KeycloakAuth:
         """Get admin access token for Keycloak API calls using service account"""
         try:
             token_url = f"{self.keycloak_url}/realms/{self.realm}/protocol/openid-connect/token"
-
             data = {
                 'grant_type': 'client_credentials',
                 'client_id': self.client_id,
@@ -72,13 +71,6 @@ class KeycloakAuth:
         """
         try:
             token_url = f"{self.keycloak_url}/realms/{self.realm}/protocol/openid-connect/token"
-
-            current_app.logger.info(f"Token info\n \
-                URL: {token_url}\n \
-                Client ID: {self.client_id}\n \
-                Client Secret: {self.client_secret}\n \
-                Public key: {self.public_key}")
-
             data = {
                 'grant_type': 'client_credentials',
                 'client_id': self.client_id,
