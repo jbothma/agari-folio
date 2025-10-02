@@ -1319,7 +1319,7 @@ class StudyAnalysisUpload(Resource):
                 return {'error': f'Failed to upload file to storage: {upload_response.status_code}'}, 500
                 
             etag = upload_response.headers.get('ETag', '').strip('"')
-            print(f"File uploaded to MinIO - ETag: {etag}")
+            app.logger.info(f"File uploaded to MinIO - ETag: {etag}")
 
             # Step 3: Finalize part upload
             finalize_part_url = f"{score}/upload/{object_id}/parts"
@@ -1344,7 +1344,7 @@ class StudyAnalysisUpload(Resource):
             if finalize_part_response.status_code != 200:
                 return {'error': f'Failed to finalize part upload: {finalize_part_response.status_code}'}, 500
                 
-            print("Part upload finalized")
+            app.logger.info("Part upload finalized")
 
             # Step 4: Finalize complete upload
             finalize_upload_url = f"{score}/upload/{object_id}"
@@ -1359,7 +1359,7 @@ class StudyAnalysisUpload(Resource):
             if finalize_upload_response.status_code != 200:
                 return {'error': f'Failed to finalize upload: {finalize_upload_response.status_code}'}, 500
                 
-            print("Upload finalized successfully")
+            app.logger.info("Upload finalized successfully")
 
             return {
                 'message': 'File uploaded successfully',
