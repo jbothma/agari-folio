@@ -1250,7 +1250,7 @@ class StudyAnalysisUpload(Resource):
 
     @study_ns.doc('upload_analysis_file')
     @require_auth(keycloak_auth)
-    @require_permission('submit_to_study', resource_type='study')
+    #@require_permission('submit_to_study', resource_type='study')
     def post(self, study_id, analysis_id):
 
         """Upload a file to an analysis in SCORE and MINIO (proxy endpoint)"""
