@@ -1256,8 +1256,8 @@ class StudyAnalysisUpload(Resource):
         """Upload a file to an analysis in SCORE and MINIO (proxy endpoint)"""
 
         try:
-            app.logger.info("Form keys:", request.form.keys())
-            app.logger.info("Form data:", request.form)
+            print("Form keys:", request.form.keys())
+            print("Form data:", request.form)
             # Parse form data
             object_id = request.form.get('object_id')
             overwrite = request.form.get('overwrite', 'true').lower() == 'true'
@@ -1280,7 +1280,7 @@ class StudyAnalysisUpload(Resource):
             import hashlib
             file_md5 = hashlib.md5(file_data).hexdigest()
             
-            print(f"File: {file.filename}, Size: {file_size}, MD5: {file_md5}")
+            app.logger.info(f"File: {file.filename}, Size: {file_size}, MD5: {file_md5}")
 
             # Get client token for SCORE API
             score_token = keycloak_auth.get_client_token()
@@ -1309,7 +1309,7 @@ class StudyAnalysisUpload(Resource):
             presigned_url = init_result['parts'][0]['url']
             object_md5 = init_result['objectMd5']
             
-            print(f"Upload initialized - Upload ID: {upload_id}")
+            app.logger.info(f"Upload initialized - Upload ID: {upload_id}")
 
             # Step 2: Upload file to MinIO using presigned URL
             upload_headers = {'Content-Type': 'text/plain'}
