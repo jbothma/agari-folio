@@ -17,7 +17,6 @@
 
 @password = pass123
 
-
 ### 1. LOGIN to get access token
 # @name login
 POST http://keycloak.local/realms/{{realm}}/protocol/openid-connect/token
@@ -248,7 +247,7 @@ Authorization: Bearer {{token}}
 @study_id = study-003
 
 # @name create_study
-POST {{folio}}/studies
+POST {{folio}}/studies/
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
@@ -338,11 +337,39 @@ Authorization: Bearer {{token}}
 
 ###
 
-@object_id_from_analysis = 14e5f58a-73ed-5359-8101-e3ae6d544fbc
+# @name get_study_analyses
+GET http://song.local/{{study_id}}/analysis/{{analysis_id}}
+Authorization: Bearer {{token}}
+
+###
 
 # @name upload_analysis_file_curl
 curl -X POST http://song.local/studies/study-002/analysis/f1646e21-6c01-4f09-a46e-216c01af09d6/upload -H "Authorization: Bearer {{token}}" -F "object_id=14e5f58a-73ed-5359-8101-e3ae6d544fbc" -F "overwrite=true" -F "file=@/home/dimee/Work/OpenUp/SANBI/agari-folio/test/test_data.fasta"
 
+###
+
+@object_id_from_analysis = 2966b6aa-7570-53a5-9392-740bd61221d5
+
+# @name upload_analysis_file_rest
+POST {{folio}}/studies/{{study_id}}/analysis/{{analysis_id}}/upload
+Authorization: Bearer {{token}}
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary123
+
+------WebKitFormBoundary123
+Content-Disposition: form-data; name="object_id"
+
+{{object_id_from_analysis}}
+------WebKitFormBoundary123
+Content-Disposition: form-data; name="overwrite"
+
+true
+------WebKitFormBoundary123
+Content-Disposition: form-data; name="file"; filename="test_data.fasta"
+Content-Type: text/plain
+
+< /media/michael/Data4/sanbi/agari-folio/test/test_data.fasta
+
+------WebKitFormBoundary123--
 ###
 
 # @name publish_analysis
