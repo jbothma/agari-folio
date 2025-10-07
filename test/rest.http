@@ -31,6 +31,31 @@ username={{username}}
 ###
 @token = {{login.response.body.access_token}}
 
+### Keycloak generate magic link
+@redirect_uri = https://agari.openup.org.za
+# @name magiclink
+POST https://keycloak-ilifu.openup.org.za/realms/{{realm}}/magic-link
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "email": "michael@openup.org.za",
+  "client_id": "dms",
+  "redirect_uri": "https://agari.openup.org.za",
+  "expiration_seconds": 3600,
+  "send_email": false
+}
+
+### Keycloak authenticate with code
+POST https://keycloak-ilifu.openup.org.za/realms/agari/protocol/openid-connect/token
+Content-Type: application/x-www-form-urlencoded
+
+client_id={{client_id}}
+&client_secret={{client_secret}}
+&grant_type=authorization_code
+&code=[add code here]
+&redirect_uri={{redirect_uri}}
+
 ##########################
 ### INFO
 ##########################
