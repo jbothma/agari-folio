@@ -4,8 +4,6 @@ from auth import KeycloakAuth, require_auth, extract_user_info, require_permissi
 from permissions import PERMISSIONS
 from database import get_db_cursor, test_connection
 import os
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail, From, To, Subject, HtmlContent, Content
 import json
 from datetime import datetime, date
 from decimal import Decimal
@@ -28,10 +26,6 @@ app.json_encoder = CustomJSONEncoder
 
 song = os.getenv('OVERTURE_SONG', 'http://song.local')
 score = os.getenv('OVERTURE_SCORE', 'http://score.local')
-
-sg_api_key = os.getenv('SENDGRID_API_KEY', '')
-sg_from_email = os.getenv('SENDGRID_FROM_EMAIL', '')
-sg_from_name = os.getenv('SENDGRID_FROM_NAME', 'AGARI')
 
 keycloak_auth = KeycloakAuth(
     keycloak_url=os.getenv('KEYCLOAK_URL', 'http://keycloak.local'),
@@ -906,30 +900,6 @@ class ProjectUsers(Resource):
             user = keycloak_auth.get_user(user_id)
             if not user:
                 return {'error': 'User not found in Keycloak'}, 404
-
-            # Send email with acceptance link
-            to_email = user.get('email')
-            to_name = user.get('firstName', '') + ' ' + user.get('lastName', '')
-            project_name = project.get('name', 'a project')
-            subject = f"You've been invited to join {project_name} on AGARI"
-            html_content = f"Invite link"
-
-            message = Mail(
-                from_email=From(self.from_email, self.from_name),
-                to_emails=To(to_email, to_name),
-                subject=Subject(subject),
-                html_content=HtmlContent(html_content)
-            )
-
-            response = self.sg.send(message)
-
-            if response.status_code in [200, 201, 202]:
-                return(f"Invitation email sent successfully")
-                # assign invited attribute to user
-            else:
-                return {'error': 'Failed to send invitation email'}, 500
-
-            ##### from here down, move to the "accept invite" endpoint  ##### debug
 
             # Remove user from all existing project roles first (role hierarchy enforcement)
             removed_roles = []
