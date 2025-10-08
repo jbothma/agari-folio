@@ -4,8 +4,6 @@ from auth import KeycloakAuth, require_auth, extract_user_info, require_permissi
 from permissions import PERMISSIONS
 from database import get_db_cursor, test_connection
 import os
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail, From, To, Subject, HtmlContent, Content
 import json
 from datetime import datetime, date
 from decimal import Decimal
