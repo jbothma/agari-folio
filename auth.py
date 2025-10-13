@@ -424,6 +424,62 @@ class KeycloakAuth:
         except requests.RequestException as e:
             print(f"Error removing attribute value: {e}")
             return False
+        
+    def update_realm_roles(self, user_id, role_names):
+        """
+        Update a user's realm roles
+        
+        Args:
+            user_id (str): The user ID to update
+            role_names (list): List of role names to assign to the user
+            
+        Returns:
+            bool: True if update was successful, False otherwise
+        """
+        admin_token = self.get_admin_token()
+        if not admin_token:
+            return False
+        
+        try:
+            # Get current user data
+            user_url = f"{self.keycloak_url}/admin/realms/{self.realm}/users/{user_id}"
+            
+            headers = {
+                'Authorization': f'Bearer {admin_token}',
+                'Content-Type': 'application/json'
+            }
+            
+            response = requests.get(user_url, headers=headers)
+            response.raise_for_status()
+            
+            user = response.json()
+            
+            # Fetch all available realm roles
+            roles_url = f"{self.keycloak_url}/admin/realms/{self.realm}/roles"
+            roles_response = requests.get(roles_url, headers=headers)
+            roles_response.raise_for_status()
+            
+            all_roles = roles_response.json()
+            role_map = {role['name']: role for role in all_roles}
+            
+            # Prepare roles to assign
+            roles_to_assign = [role_map[role_name] for role_name in role_names if role_name in role_map]
+            
+            if not roles_to_assign:
+                print(f"No valid roles found to assign for user {user_id}")
+                return False
+            
+            # Assign roles to user
+            assign_url = f"{self.keycloak_url}/admin/realms/{self.realm}/users/{user_id}/role-mappings/realm"
+            assign_response = requests.post(assign_url, headers=headers, json=roles_to_assign)
+            assign_response.raise_for_status()
+            
+            return True
+            
+        except requests.RequestException as e:
+            print(f"Error updating realm roles: {e}")
+            return False
+        
     
 
 def require_auth(keycloak_auth):
