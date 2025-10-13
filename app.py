@@ -421,6 +421,87 @@ class PathogenRestore(Resource):
                 return {'error': 'Cannot restore: A pathogen with this name already exists'}, 409
             return {'error': f'Database error: {str(e)}'}, 500
 
+##########################
+### USERS
+##########################
+
+user_ns = api.namespace('users', description='User management endpoints')
+@user_ns.route('/')
+class UserList(Resource):
+    ### GET /users ###
+
+    @user_ns.doc('list_users')
+    @require_auth(keycloak_auth)
+    @require_permission('system_admin_access')
+    def get(self):
+
+        """List all users (system-admin only)"""
+        
+        try:
+            users = keycloak_auth.get_all_users()
+            return users
+        except Exception as e:
+            return {'error': f'Failed to retrieve users: {str(e)}'}, 500
+
+    ### PUT /users ###
+    @user_ns.doc('update_user')
+    @require_auth(keycloak_auth)
+    @require_permission('system_admin_access')
+    def put(self):
+        """Update a user's attributes (system-admin only)
+
+        Request Body:
+        {
+            "user_id": "<keycloak_user_id>",
+            "attributes": {
+                "agari-org-owner": ["org_id1", "org_id2"],
+                "agari-org-admin": ["org_id1"],
+                "agari-org-viewer": ["org_id2"],
+                "project-admin": ["project_id1"],
+                "project-contributor": ["project_id1", "project_id2"],
+                "project-viewer": ["project_id2"],
+                "organisation_id": ["org_id1"]
+            }
+        }
+        """
+        try:
+            data = request.get_json()
+            if not data:
+                return {'error': 'No JSON data provided'}, 400
+            
+            user_id = data.get('user_id')
+            attributes = data.get('attributes')
+
+            if not user_id or not attributes:
+                return {'error': 'user_id and attributes are required'}, 400
+
+            # Check if user exists in Keycloak
+            user = keycloak_auth.get_user(user_id)
+            if not user:
+                return {'error': 'User not found in Keycloak'}, 404
+
+            # Update each attribute
+            for attr, values in attributes.items():
+                if not isinstance(values, list):
+                    return {'error': f'Attribute values for {attr} must be a list'}, 400
+                
+                # Remove existing values for the attribute
+                existing_values = user.get('attributes', {}).get(attr, [])
+                for val in existing_values:
+                    keycloak_auth.remove_attribute_value(user_id, attr, val)
+                
+                # Add new values
+                for val in values:
+                    keycloak_auth.add_attribute_value(user_id, attr, val)
+            
+            return {'message': 'User attributes updated successfully'}, 200
+
+        except Exception as e:
+            return {'error': f'Failed to update user: {str(e)}'}, 500
+
+        
+
+
 
 ##########################
 ### PROJECTS
