@@ -461,7 +461,8 @@ class UserList(Resource):
                 "project-contributor": ["project_id1", "project_id2"],
                 "project-viewer": ["project_id2"],
                 "organisation_id": ["org_id1"]
-            }
+            },
+            "realmRoles": ["role1", "role2"] 
         }
         """
         try:
@@ -471,9 +472,10 @@ class UserList(Resource):
             
             user_id = data.get('user_id')
             attributes = data.get('attributes')
+            realm_roles = data.get('realmRoles')
 
-            if not user_id or not attributes:
-                return {'error': 'user_id and attributes are required'}, 400
+            if not user_id:
+                return {'error': 'user_id is required'}, 400
 
             # Check if user exists in Keycloak
             user = keycloak_auth.get_user(user_id)
@@ -481,10 +483,16 @@ class UserList(Resource):
                 return {'error': 'User not found in Keycloak'}, 404
 
             # Update each attribute
-            for attr, values in attributes.items():
-                if not isinstance(values, list):
-                    return {'error': f'Attribute values for {attr} must be a list'}, 400
-                
+            if realm_roles is not None:
+                if not isinstance(realm_roles, list):
+                    return {'error': 'realmRoles must be a list'}, 400
+                keycloak_auth.update_realm_roles(user_id, realm_roles)
+
+            if attributes is not None:
+                for attr, values in attributes.items():
+                    if not isinstance(values, list):
+                        return {'error': f'Attribute values for {attr} must be a list'}, 400
+
                 # Remove existing values for the attribute
                 existing_values = user.get('attributes', {}).get(attr, [])
                 for val in existing_values:
@@ -494,7 +502,7 @@ class UserList(Resource):
                 for val in values:
                     keycloak_auth.add_attribute_value(user_id, attr, val)
             
-            return {'message': 'User attributes updated successfully'}, 200
+            return {'message': 'User details updated successfully'}, 200
 
         except Exception as e:
             return {'error': f'Failed to update user: {str(e)}'}, 500
