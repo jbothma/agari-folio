@@ -444,5 +444,6 @@ Content-Type: application/json
 
 {
   "email": "michael@openup.org.za",
-  "redirect_uri": "https://agari.openup.org.za/"
+  "redirect_uri": "https://agari.openup.org.za/",
+  "send_email": "false"
 }
