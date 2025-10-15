@@ -553,7 +553,7 @@ class UserList(Resource):
             return {
                 'message': 'Magic link sent successfully',
                 'email': email,
-                'user_id': response_data.user_id
+                'user_id': response_data.get('user_id'),
             }, 200
         else:
             return {
