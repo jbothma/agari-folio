@@ -507,9 +507,55 @@ class UserList(Resource):
         except Exception as e:
             return {'error': f'Failed to update user: {str(e)}'}, 500
 
+    @user_ns.doc('create_user')
+    @require_auth(keycloak_auth)
+    @require_permission('change_org_member_roles')
+    def post(self):
+        data = request.get_json()
+        if not data:
+            return {'error': 'No JSON data provided'}, 400
         
+        email = data.get('email')
+        redirect_uri = data.get('redirect_uri')
+        expiration_seconds = data.get('expiration_seconds', 3600)
 
+        if not email:
+            return {'error': 'Email is required'}, 400
+        if not redirect_uri:
+            return {'error': 'Redirect is required'}, 400
 
+        admin_token = keycloak_auth.get_admin_token()
+        if not admin_token:
+            return {'error': 'Failed to authenticate with Keycloak admin'}, 500
+        headers = {
+            'Authorization': f'Bearer {admin_token}',
+            'Content-Type': 'application/json'
+        }
+        payload = {
+            'email': email,
+            'client_id': keycloak_auth.client_id,
+            'redirect_uri': redirect_uri,
+            'expiration_seconds': expiration_seconds
+        }
+        magic_link_url = f"{keycloak_auth.keycloak_url}/realms/{keycloak_auth.realm}/magic-link"
+
+        keycloak_response = requests.post(
+            magic_link_url,
+            headers=headers,
+            json=payload
+        )
+
+        if keycloak_response.status_code == 200:
+            response_data = keycloak_response.json()
+            return {
+                'message': 'Magic link sent successfully',
+                'email': email,
+                'user': response_data
+            }, 200
+        else:
+            return {
+                'error': f'Failed to create magic link.'
+            }, 500
 
 ##########################
 ### PROJECTS
