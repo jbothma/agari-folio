@@ -568,7 +568,18 @@ class ProjectList(Resource):
     @require_permission('create_project')
     def post(self):
         
-        """Create a new project"""
+        """Create a new project
+        
+        Request Body:
+        {
+            "name": "Project Name",
+            "description": "Optional description",
+            "pathogen_id": "<associated_pathogen_id>",
+            "privacy": "public|private|semi-private" 
+        }
+        
+        
+        """
 
          # Extract user info to get the user_id and organisation_id
         user_info = extract_user_info(request.user)
@@ -663,7 +674,17 @@ class Project(Resource):
     @require_permission('edit_projects')
     def put(self, project_id):
 
-        """Update a project by ID user permissions and organisation scope"""
+        """Update a project by ID user permissions and organisation scope
+
+        Request Body (any of the fields can be updated):
+        {
+            "name": "New Project Name",
+            "description": "Updated description",
+            "pathogen_id": "<new_pathogen_id>",
+            "privacy": "public|private|semi-private"
+        }
+        """
+
 
         organisation_id = keycloak_auth.get_user_org()
 
