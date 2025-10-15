@@ -401,3 +401,34 @@ Content-Type: text/plain
 POST {{folio}}/studies/{{study_id}}/analysis/publish/{{analysis_id}}
 Authorization: Bearer {{token}}
 
+### Get user by email
+# @name getUserByEmail
+GET https://keycloak-ilifu.openup.org.za/admin/realms/{{realm}}/users?email=michael@openup.org.za
+Authorization: Bearer {{token}}
+
+###
+@user_id = 9af85893-2402-4069-95ef-16045ab5a77f
+
+### Keycloak update user details
+PUT https://keycloak-ilifu.openup.org.za/admin/realms/{{realm}}/users/{{user_id}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "firstName": "Michael"
+}
+
+### Create new user in Keycloak
+# @name createUser
+POST https://keycloak-ilifu.openup.org.za/admin/realms/{{realm}}/users
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "username": "newuser@example.com",
+  "email": "newuser@example.com",
+  "enabled": false,
+  "attributes": {
+    "invite": ["sent"]
+  }
+}
