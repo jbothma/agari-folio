@@ -637,7 +637,7 @@ def user_has_permission(user_info, permission_name, resource_type=None, resource
                 access_details['reason'] = f'User has role "{required_role}"'
                 return True, access_details
 
-    # 3. Check attribute-based roles (attr-project-admin, attr-study-contributor, etc.)
+    # 3. Check attribute-based roles (attr-project-admin, attr-project-contributor, etc.)
     if resource_id and user_id:
         access_details['checks_performed'].append('attribute_role_check')
         for required_role in required_roles:

@@ -1257,15 +1257,15 @@ class StudyList(Resource):
                 return {'error': f'Study with name "{name}" already exists'}, 409
             return {'error': f'Database error: {str(e)}'}, 500
 
-@study_ns.route('/submit/<string:study_id>/')
+@study_ns.route('/submit/<string:project_id>/<string:study_id>/')
 class SongSubmit(Resource):
     
-    ### POST /studies/submit/<study_id>/ ###
+    ### POST /studies/submit/<project_id>/<study_id>/ ###
 
     @study_ns.doc('submit_study')
     @require_auth(keycloak_auth)
-    @require_permission('upload_analysis', resource_type='project')
-    def post(self, study_id):
+    @require_permission('upload_analysis', resource_type='project', resource_id_arg='project_id')
+    def post(self, project_id, study_id):
 
         """Submit an analysis to SONG (proxy endpoint)"""
         
@@ -1360,7 +1360,7 @@ class StudyAnalysisUpload(Resource):
 
     @study_ns.doc('upload_analysis_file')
     @require_auth(keycloak_auth)
-    #@require_permission('submit_to_study', resource_type='study')
+    @require_permission('submit_to_study', resource_type='study')
     def post(self, study_id, analysis_id):
 
         """Upload a file to an analysis in SCORE and MINIO (proxy endpoint)"""
