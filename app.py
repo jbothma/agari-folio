@@ -538,7 +538,7 @@ class ProjectList(Resource):
                         SELECT *
                         FROM projects
                         WHERE deleted_at IS NULL
-                        AND (privacy = 'public' OR organisation_id = %s)
+                        AND (privacy = 'public' or privacy = 'semi-private' OR organisation_id = %s)
                         ORDER BY name
                     """, (organisation_id,))
                     
@@ -547,7 +547,7 @@ class ProjectList(Resource):
                         SELECT *
                         FROM projects
                         WHERE deleted_at IS NULL
-                        AND privacy = 'public'
+                        AND (privacy = 'public' or privacy = 'semi-private')
                         ORDER BY name
                     """)
 
@@ -654,7 +654,7 @@ class Project(Resource):
                         SELECT *
                         FROM projects
                         WHERE id = %s AND deleted_at IS NULL
-                        AND privacy = 'public'
+                        AND (privacy = 'public' OR privacy = 'semi-private')
                         ORDER BY name
                     """, (project_id,))
 
@@ -684,30 +684,6 @@ class Project(Resource):
             "privacy": "public|private|semi-private"
         }
         """
-
-
-        organisation_id = keycloak_auth.get_user_org()
-
-        if not organisation_id:
-            return {'error': 'User does not belong to any organization'}, 400
-        else:
-            print(f"User's organisation_id: {organisation_id}")
-            with get_db_cursor() as cursor:
-                cursor.execute("""
-                    SELECT organisation_id 
-                    FROM projects 
-                    WHERE id = %s AND deleted_at IS NULL
-                """, (project_id,))
-                
-                project = cursor.fetchone()
-                
-                if not project:
-                    return {'error': 'Project not found or already deleted'}, 404
-                
-                project_org_id = project['organisation_id']
-                
-                if project_org_id != organisation_id:
-                    return {'error': 'User does not have permission to update this project'}, 403
 
         try:
             data = request.get_json()
@@ -779,29 +755,6 @@ class Project(Resource):
         - hard: true/false (default: false) - If true, permanently delete from database
         """
 
-        organisation_id = keycloak_auth.get_user_org()
-
-        if not organisation_id:
-            return {'error': 'User does not belong to any organization'}, 400
-        else:
-            print(f"User's organisation_id: {organisation_id}")
-            with get_db_cursor() as cursor:
-                cursor.execute("""
-                    SELECT organisation_id 
-                    FROM projects 
-                    WHERE id = %s
-                """, (project_id,))
-                
-                project = cursor.fetchone()
-                
-                if not project:
-                    return {'error': 'Project not found or already deleted'}, 404
-                
-                project_org_id = project['organisation_id']
-                
-                if project_org_id != organisation_id:
-                    return {'error': 'User does not have permission to delete this project'}, 403
-
         try:
             # Check if hard delete is requested
             hard_delete = request.args.get('hard', 'false').lower() == 'true'
@@ -858,29 +811,6 @@ class ProjectRestore(Resource):
 
         """Restore a soft-deleted project (system-admin only)"""
 
-        organisation_id = keycloak_auth.get_user_org()
-
-        if not organisation_id:
-            return {'error': 'User does not belong to any organization'}, 400
-        else:
-            print(f"User's organisation_id: {organisation_id}")
-            with get_db_cursor() as cursor:
-                cursor.execute("""
-                    SELECT organisation_id 
-                    FROM projects 
-                    WHERE id = %s
-                """, (project_id,))
-                
-                project = cursor.fetchone()
-                
-                if not project:
-                    return {'error': 'Project not found or already deleted'}, 404
-                
-                project_org_id = project['organisation_id']
-                
-                if project_org_id != organisation_id:
-                    return {'error': 'User does not have permission to restore this project'}, 403
-                
         try:
             with get_db_cursor() as cursor:
                 cursor.execute("""
@@ -963,38 +893,6 @@ class ProjectUsers(Resource):
 
         """Add a user to a project with a specific role"""
 
-        #####################
-        ### ABSTRACT THIS ###
-        #####################
-
-        organisation_id = keycloak_auth.get_user_org()
-
-        if not organisation_id:
-            return {'error': 'User does not belong to any organisation'}, 400
-        else:
-            print(f"User's organisation_id: {organisation_id}")
-            with get_db_cursor() as cursor:
-                cursor.execute("""
-                    SELECT organisation_id 
-                    FROM projects 
-                    WHERE id = %s
-                """, (project_id,))
-                
-                project = cursor.fetchone()
-                
-                if not project:
-                    return {'error': 'Project not found or already deleted'}, 404
-                
-                project_org_id = project['organisation_id']
-                
-                if project_org_id != organisation_id:
-                    return {'error': 'User does not have permission to manage users on this project'}, 403
-
-        ####################
-        ### END ABSTRACT ###
-        ####################
-        
-
         try:
             data = request.get_json()
             if not data:
@@ -1052,37 +950,6 @@ class DeleteProjectUsers(Resource):
     def delete(self, project_id, user_id):
 
         """Remove a user from a project"""
-
-        #####################
-        ### ABSTRACT THIS ###
-        #####################
-
-        organisation_id = keycloak_auth.get_user_org()
-
-        if not organisation_id:
-            return {'error': 'User does not belong to any organisation'}, 400
-        else:
-            print(f"User's organisation_id: {organisation_id}")
-            with get_db_cursor() as cursor:
-                cursor.execute("""
-                    SELECT organisation_id 
-                    FROM projects 
-                    WHERE id = %s
-                """, (project_id,))
-                
-                project = cursor.fetchone()
-                
-                if not project:
-                    return {'error': 'Project not found or already deleted'}, 404
-                
-                project_org_id = project['organisation_id']
-                
-                if project_org_id != organisation_id:
-                    return {'error': 'User does not have permission to manage users on this project'}, 403
-
-        ####################
-        ### END ABSTRACT ###
-        ####################
 
         try:
             # Check if user exists in Keycloak
@@ -1152,7 +1019,7 @@ class StudyList(Resource):
 
     @study_ns.doc('create_study')
     @require_auth(keycloak_auth)
-    @require_permission('create_study', resource_type='study')
+    @require_permission('create_study', resource_type='project', resource_id_arg='projectId')
     def post(self):
         """Create a new study"""
         try:
@@ -1172,26 +1039,6 @@ class StudyList(Resource):
                 return {'error': 'Study name is required'}, 400
             if not projectId:
                 return {'error': 'Associated projectId is required'}, 400
-    
-            # --- Organisation check (reuse pattern) ---
-            organisation_id = keycloak_auth.get_user_org()
-            if not organisation_id:
-                return {'error': 'User does not belong to any organisation'}, 400
-            else:
-                app.logger.info(f"User's organisation_id: {organisation_id}")
-                with get_db_cursor() as cursor:
-                    cursor.execute("""
-                        SELECT organisation_id 
-                        FROM projects 
-                        WHERE id = %s
-                    """, (projectId,))
-                    project = cursor.fetchone()
-                    if not project:
-                        return {'error': 'Project not found or already deleted'}, 404
-                    project_org_id = project['organisation_id']
-                    if project_org_id != organisation_id:
-                        return {'error': 'User does not have permission to create studies in this project'}, 403
-            # --- End organisation check ---
     
             ### CHECK IF STUDYID EXISTS IN SONG ###
             app.logger.info(f"Checking if studyId '{studyId}' exists in SONG before creating locally...")
@@ -1353,139 +1200,139 @@ class StudyAnalysis(Resource):
         except Exception as e:
             return {'error': f'Failed to retrieve analysis results: {str(e)}'}, 500
 
-@study_ns.route('/<string:study_id>/analysis/<string:analysis_id>/upload')
-class StudyAnalysisUpload(Resource):
+# @study_ns.route('/<string:study_id>/analysis/<string:analysis_id>/upload')
+# class StudyAnalysisUpload(Resource):
     
-    ### POST /studies/<study_id>/analysis/<analysis_id>/upload ###
+#     ### POST /studies/<study_id>/analysis/<analysis_id>/upload ###
 
-    @study_ns.doc('upload_analysis_file')
-    @require_auth(keycloak_auth)
-    @require_permission('submit_to_study', resource_type='study')
-    def post(self, study_id, analysis_id):
+#     @study_ns.doc('upload_analysis_file')
+#     @require_auth(keycloak_auth)
+#     @require_permission('submit_to_study', resource_type='study')
+#     def post(self, study_id, analysis_id):
 
-        """Upload a file to an analysis in SCORE and MINIO (proxy endpoint)"""
+#         """Upload a file to an analysis in SCORE and MINIO (proxy endpoint)"""
 
-        try:
-            print("Form keys:", request.form.keys())
-            print("Form data:", request.form)
-            # Parse form data
-            object_id = request.form.get('object_id')
-            overwrite = request.form.get('overwrite', 'true').lower() == 'true'
+#         try:
+#             print("Form keys:", request.form.keys())
+#             print("Form data:", request.form)
+#             # Parse form data
+#             object_id = request.form.get('object_id')
+#             overwrite = request.form.get('overwrite', 'true').lower() == 'true'
             
-            if not object_id:
-                return {'error': 'object_id is required'}, 400
+#             if not object_id:
+#                 return {'error': 'object_id is required'}, 400
                 
-            # Get the uploaded file
-            if 'file' not in request.files:
-                return {'error': 'No file provided'}, 400
+#             # Get the uploaded file
+#             if 'file' not in request.files:
+#                 return {'error': 'No file provided'}, 400
                 
-            file = request.files['file']
-            if file.filename == '':
-                return {'error': 'No file selected'}, 400
+#             file = request.files['file']
+#             if file.filename == '':
+#                 return {'error': 'No file selected'}, 400
 
-            # Read file data and calculate size/MD5
-            file_data = file.read()
-            file_size = len(file_data)
+#             # Read file data and calculate size/MD5
+#             file_data = file.read()
+#             file_size = len(file_data)
             
-            import hashlib
-            file_md5 = hashlib.md5(file_data).hexdigest()
+#             import hashlib
+#             file_md5 = hashlib.md5(file_data).hexdigest()
             
-            app.logger.info(f"File: {file.filename}, Size: {file_size}, MD5: {file_md5}")
+#             app.logger.info(f"File: {file.filename}, Size: {file_size}, MD5: {file_md5}")
 
-            # Get client token for SCORE API
-            score_token = keycloak_auth.get_client_token()
-            if not score_token:
-                return {'error': 'Failed to authenticate with SCORE service'}, 500
+#             # Get client token for SCORE API
+#             score_token = keycloak_auth.get_client_token()
+#             if not score_token:
+#                 return {'error': 'Failed to authenticate with SCORE service'}, 500
 
-            score_headers = {
-                'Authorization': f'Bearer {score_token}',
-                'Content-Type': 'application/x-www-form-urlencoded'
-            }
+#             score_headers = {
+#                 'Authorization': f'Bearer {score_token}',
+#                 'Content-Type': 'application/x-www-form-urlencoded'
+#             }
 
-            # Step 1: Initialize upload with SCORE
-            init_upload_url = f"{score}/upload/{object_id}/uploads"
-            init_data = {
-                'fileSize': file_size,
-                'md5': file_md5,
-                'overwrite': overwrite
-            }
-            app.logger.info(f"Score URL {init_upload_url}")
-            init_response = requests.post(init_upload_url, headers=score_headers, data=init_data)
-            app.logger.info(f"Score upload response: {init_response}")
-            if init_response.status_code != 200:
-                return {'error': f'Failed to initialize upload: {init_response.status_code} - {init_response.text}'}, 500
+#             # Step 1: Initialize upload with SCORE
+#             init_upload_url = f"{score}/upload/{object_id}/uploads"
+#             init_data = {
+#                 'fileSize': file_size,
+#                 'md5': file_md5,
+#                 'overwrite': overwrite
+#             }
+#             app.logger.info(f"Score URL {init_upload_url}")
+#             init_response = requests.post(init_upload_url, headers=score_headers, data=init_data)
+#             app.logger.info(f"Score upload response: {init_response}")
+#             if init_response.status_code != 200:
+#                 return {'error': f'Failed to initialize upload: {init_response.status_code} - {init_response.text}'}, 500
                 
-            init_result = init_response.json()
-            upload_id = init_result['uploadId']
-            presigned_url = init_result['parts'][0]['url']
-            object_md5 = init_result['objectMd5']
+#             init_result = init_response.json()
+#             upload_id = init_result['uploadId']
+#             presigned_url = init_result['parts'][0]['url']
+#             object_md5 = init_result['objectMd5']
             
-            app.logger.info(f"Upload initialized - Upload ID: {upload_id}")
+#             app.logger.info(f"Upload initialized - Upload ID: {upload_id}")
 
-            # Step 2: Upload file to MinIO using presigned URL
-            upload_headers = {'Content-Type': 'text/plain'}
-            upload_response = requests.put(presigned_url, headers=upload_headers, data=file_data)
+#             # Step 2: Upload file to MinIO using presigned URL
+#             upload_headers = {'Content-Type': 'text/plain'}
+#             upload_response = requests.put(presigned_url, headers=upload_headers, data=file_data)
             
-            if upload_response.status_code != 200:
-                return {'error': f'Failed to upload file to storage: {upload_response.status_code}'}, 500
+#             if upload_response.status_code != 200:
+#                 return {'error': f'Failed to upload file to storage: {upload_response.status_code}'}, 500
                 
-            etag = upload_response.headers.get('ETag', '').strip('"')
-            app.logger.info(f"File uploaded to MinIO - ETag: {etag}")
+#             etag = upload_response.headers.get('ETag', '').strip('"')
+#             app.logger.info(f"File uploaded to MinIO - ETag: {etag}")
 
-            # Step 3: Finalize part upload
-            finalize_part_url = f"{score}/upload/{object_id}/parts"
-            finalize_part_params = {
-                'partNumber': 1,
-                'etag': etag,
-                'md5': object_md5,
-                'uploadId': upload_id
-            }
+#             # Step 3: Finalize part upload
+#             finalize_part_url = f"{score}/upload/{object_id}/parts"
+#             finalize_part_params = {
+#                 'partNumber': 1,
+#                 'etag': etag,
+#                 'md5': object_md5,
+#                 'uploadId': upload_id
+#             }
             
-            score_json_headers = {
-                'Authorization': f'Bearer {score_token}',
-                'Content-Type': 'application/json'
-            }
+#             score_json_headers = {
+#                 'Authorization': f'Bearer {score_token}',
+#                 'Content-Type': 'application/json'
+#             }
             
-            finalize_part_response = requests.post(
-                finalize_part_url, 
-                headers=score_json_headers, 
-                params=finalize_part_params
-            )
+#             finalize_part_response = requests.post(
+#                 finalize_part_url, 
+#                 headers=score_json_headers, 
+#                 params=finalize_part_params
+#             )
             
-            if finalize_part_response.status_code != 200:
-                return {'error': f'Failed to finalize part upload: {finalize_part_response.status_code}'}, 500
+#             if finalize_part_response.status_code != 200:
+#                 return {'error': f'Failed to finalize part upload: {finalize_part_response.status_code}'}, 500
                 
-            app.logger.info("Part upload finalized")
+#             app.logger.info("Part upload finalized")
 
-            # Step 4: Finalize complete upload
-            finalize_upload_url = f"{score}/upload/{object_id}"
-            finalize_upload_params = {'uploadId': upload_id}
+#             # Step 4: Finalize complete upload
+#             finalize_upload_url = f"{score}/upload/{object_id}"
+#             finalize_upload_params = {'uploadId': upload_id}
             
-            finalize_upload_response = requests.post(
-                finalize_upload_url, 
-                headers=score_json_headers, 
-                params=finalize_upload_params
-            )
+#             finalize_upload_response = requests.post(
+#                 finalize_upload_url, 
+#                 headers=score_json_headers, 
+#                 params=finalize_upload_params
+#             )
             
-            if finalize_upload_response.status_code != 200:
-                return {'error': f'Failed to finalize upload: {finalize_upload_response.status_code}'}, 500
+#             if finalize_upload_response.status_code != 200:
+#                 return {'error': f'Failed to finalize upload: {finalize_upload_response.status_code}'}, 500
                 
-            app.logger.info("Upload finalized successfully")
+#             app.logger.info("Upload finalized successfully")
 
-            return {
-                'message': 'File uploaded successfully',
-                'study_id': study_id,
-                'analysis_id': analysis_id,
-                'object_id': object_id,
-                'filename': file.filename,
-                'file_size': file_size,
-                'md5': file_md5,
-                'upload_id': upload_id,
-                'etag': etag
-            }, 200
+#             return {
+#                 'message': 'File uploaded successfully',
+#                 'study_id': study_id,
+#                 'analysis_id': analysis_id,
+#                 'object_id': object_id,
+#                 'filename': file.filename,
+#                 'file_size': file_size,
+#                 'md5': file_md5,
+#                 'upload_id': upload_id,
+#                 'etag': etag
+#             }, 200
 
-        except Exception as e:
-            return {'error': f'Failed to upload file: {str(e)}'}, 500
+#         except Exception as e:
+#             return {'error': f'Failed to upload file: {str(e)}'}, 500
        
 @study_ns.route('/<string:study_id>/analysis/publish/<string:analysis_id>')
 class StudyAnalysisPublish(Resource):
