@@ -31,7 +31,7 @@ PERMISSIONS = {
 
     # Study management
     "view_studies": ["system-admin","agari-org-owner", "agari-org-admin", "agari-org-viewer"],
-    "create_study": ["system-admin", "agari-org-owner", "agari-org-admin", "attr-project-admin"],
+    "create_study": ["system-admin", "agari-org-owner", "agari-org-admin", "attr-project-admin", "attr-project-contributor"],
     "edit_study": ["system-admin", "agari-org-owner", "agari-org-admin", "attr-project-admin"],
     "delete_study": ["system-admin", "agari-org-owner", "agari-org-admin", "attr-project-admin"],
     "list_study_users": ["system-admin", "agari-org-owner", "agari-org-admin", "attr-project-admin"],
