@@ -36,5 +36,5 @@ PERMISSIONS = {
     "delete_study": ["system-admin", "agari-org-owner", "agari-org-admin", "attr-project-admin"],
     "list_study_users": ["system-admin", "agari-org-owner", "agari-org-admin", "attr-project-admin"],
     "manage_study_users": ["system-admin", "agari-org-owner", "agari-org-admin", "attr-project-admin"],
-    "submit_to_study": ["system-admin", "agari-org-owner", "agari-org-admin", "attr-project-admin", "attr-study-contributor"]
+    "submit_to_study": ["system-admin", "agari-org-owner", "agari-org-admin", "attr-project-admin", "attr-project-contributor", "attr-study-contributor"]
 }
