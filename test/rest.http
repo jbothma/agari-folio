@@ -1,4 +1,7 @@
-@folio = http://localhost:5000
+#@folio = http://localhost:5000
+@folio = https://folio-staging.openup.org.za
+@keycloak = https://keycloak-staging.openup.org.za
+
 
 
 @realm = agari
@@ -19,7 +22,7 @@
 
 ### 1. LOGIN to get access token
 # @name login
-POST http://keycloak.local/realms/{{realm}}/protocol/openid-connect/token
+POST {{keycloak}}/realms/{{realm}}/protocol/openid-connect/token
 Content-Type: application/x-www-form-urlencoded
 
 username={{username}}
@@ -34,7 +37,7 @@ username={{username}}
 ### Keycloak generate magic link
 @redirect_uri = https://agari.openup.org.za
 # @name magiclink
-POST https://keycloak-ilifu.openup.org.za/realms/{{realm}}/magic-link
+POST {{keycloak}}/realms/{{realm}}/magic-link
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
@@ -47,7 +50,7 @@ Content-Type: application/json
 }
 
 ### Keycloak authenticate with code
-POST https://keycloak-ilifu.openup.org.za/realms/agari/protocol/openid-connect/token
+POST {{keycloak}}/realms/agari/protocol/openid-connect/token
 Content-Type: application/x-www-form-urlencoded
 
 client_id={{client_id}}
@@ -403,14 +406,14 @@ Authorization: Bearer {{token}}
 
 ### Get user by email
 # @name getUserByEmail
-GET https://keycloak-ilifu.openup.org.za/admin/realms/{{realm}}/users?email=michael@openup.org.za
+GET {{keycloak}}/admin/realms/{{realm}}/users?email=michael@openup.org.za
 Authorization: Bearer {{token}}
 
 ###
 @user_id = 9af85893-2402-4069-95ef-16045ab5a77f
 
 ### Keycloak update user details
-PUT https://keycloak-ilifu.openup.org.za/admin/realms/{{realm}}/users/{{user_id}}
+PUT {{keycloak}}/admin/realms/{{realm}}/users/{{user_id}}
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
@@ -420,7 +423,7 @@ Content-Type: application/json
 
 ### Create new user in Keycloak
 # @name createUser
-POST https://keycloak-ilifu.openup.org.za/admin/realms/{{realm}}/users
+POST {{keycloak}}/admin/realms/{{realm}}/users
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
@@ -431,4 +434,15 @@ Content-Type: application/json
   "attributes": {
     "invite": ["sent"]
   }
+}
+
+### Create new user in Folio magic link
+# @name createUserMagicLink
+POST {{folio}}/users/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "email": "michael@openup.org.za",
+  "redirect_uri": "https://agari.openup.org.za/"
 }

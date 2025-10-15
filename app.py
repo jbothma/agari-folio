@@ -518,6 +518,7 @@ class UserList(Resource):
         email = data.get('email')
         redirect_uri = data.get('redirect_uri')
         expiration_seconds = data.get('expiration_seconds', 3600)
+        send_email = data.get('send_email', True)
 
         if not email:
             return {'error': 'Email is required'}, 400
@@ -535,7 +536,8 @@ class UserList(Resource):
             'email': email,
             'client_id': keycloak_auth.client_id,
             'redirect_uri': redirect_uri,
-            'expiration_seconds': expiration_seconds
+            'expiration_seconds': expiration_seconds,
+            'send_email': send_email
         }
         magic_link_url = f"{keycloak_auth.keycloak_url}/realms/{keycloak_auth.realm}/magic-link"
 
@@ -550,7 +552,7 @@ class UserList(Resource):
             return {
                 'message': 'Magic link sent successfully',
                 'email': email,
-                'user': response_data
+                'user_id': response_data.user_id
             }, 200
         else:
             return {
