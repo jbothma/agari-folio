@@ -446,7 +446,7 @@ class UserList(Resource):
     ### PUT /users ###
     @user_ns.doc('update_user')
     @require_auth(keycloak_auth)
-    @require_permission('system_admin_access')
+    @require_permission('change_org_member_roles')
     def put(self):
         """Update a user's attributes (system-admin only)
 
@@ -1264,7 +1264,7 @@ class SongSubmit(Resource):
 
     @study_ns.doc('submit_study')
     @require_auth(keycloak_auth)
-    @require_permission('submit_to_study', resource_type='study')
+    @require_permission('upload_analysis', resource_type='project')
     def post(self, study_id):
 
         """Submit an analysis to SONG (proxy endpoint)"""

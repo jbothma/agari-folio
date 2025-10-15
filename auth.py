@@ -480,6 +480,54 @@ class KeycloakAuth:
             print(f"Error updating realm roles: {e}")
             return False
         
+    ### UPDATE USER PROFILE ###
+    
+    def update_user_profile(self, user_id, profile_data):
+        """
+        Update a user's basic profile information (username, firstName, lastName, email)
+        
+        Args:
+            user_id (str): The user ID to update
+            profile_data (dict): Dictionary containing profile fields to update
+                                Supported fields: username, firstName, lastName, email
+                                
+        Returns:
+            bool: True if update was successful, False otherwise
+        """
+        admin_token = self.get_admin_token()
+        if not admin_token:
+            return False
+        
+        try:
+            # Get current user data
+            user_url = f"{self.keycloak_url}/admin/realms/{self.realm}/users/{user_id}"
+            
+            headers = {
+                'Authorization': f'Bearer {admin_token}',
+                'Content-Type': 'application/json'
+            }
+            
+            response = requests.get(user_url, headers=headers)
+            response.raise_for_status()
+            
+            user = response.json()
+            
+            # Update only the provided fields
+            allowed_fields = ['username', 'firstName', 'lastName', 'email']
+            for field in allowed_fields:
+                if field in profile_data:
+                    user[field] = profile_data[field]
+            
+            # Send update request
+            update_response = requests.put(user_url, headers=headers, json=user)
+            update_response.raise_for_status()
+            
+            return True
+            
+        except requests.RequestException as e:
+            print(f"Error updating user profile: {e}")
+            return False
+        
     
 
 def require_auth(keycloak_auth):
