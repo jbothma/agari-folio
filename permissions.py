@@ -31,9 +31,9 @@ PERMISSIONS = {
 
     # Study management
     "view_studies": ["system-admin","agari-org-owner", "agari-org-admin", "agari-org-contributor", "agari-org-viewer", "attr-project-admin", "attr-project-contributor", "attr-project-viewer"],   
-    "create_study": ["system-admin", "agari-org-owner", "agari-org-admin", "attr-project-admin"],
-    "edit_study": ["system-admin", "agari-org-owner", "agari-org-admin", "attr-project-admin"],
-    "delete_study": ["system-admin", "agari-org-owner", "agari-org-admin", "attr-project-admin"],
+    "create_study": ["system-admin", "agari-org-owner", "agari-org-admin", "attr-project-admin", "attr-project-contributor"],
+    "edit_study": ["system-admin", "agari-org-owner", "agari-org-admin", "attr-project-admin", "attr-project-contributor"],
+    "delete_study": ["system-admin", "agari-org-owner", "agari-org-admin", "attr-project-admin", "attr-project-contributor"],
     "list_study_users": ["system-admin", "agari-org-owner", "agari-org-admin", "attr-project-admin"],
     "manage_study_users": ["system-admin", "agari-org-owner", "agari-org-admin", "attr-project-admin"],
     "submit_to_study": ["system-admin", "agari-org-owner", "agari-org-admin", "agari-org-contributor", "attr-project-admin", "attr-project-contributor"],
