@@ -538,6 +538,7 @@ class UserList(Resource):
             'redirect_uri': redirect_uri,
             'expiration_seconds': expiration_seconds,
             'force_create': True,
+            'reusable': False,
             'send_email': send_email
         }
         magic_link_url = f"{keycloak_auth.keycloak_url}/realms/{keycloak_auth.realm}/magic-link"
