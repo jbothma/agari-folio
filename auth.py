@@ -595,19 +595,17 @@ def extract_user_info(token_payload):
 
 def user_has_permission(user_info, permission_name, resource_type=None, resource_id=None, parent_project_id=None):
     """
-    Unified permission checking function that handles all access control logic (roles and attribute-based only).
-    Organization checks are not performed here.
-    Args:
-        user_info (dict): User information from JWT token
-        permission_name (str): The permission to check (e.g., 'edit_project')
-        resource_type (str): Optional - 'project' or 'study' for resource-specific checks
-        resource_id (str): Optional - specific resource ID for attribute-based checks
-    Returns:
-        tuple: (has_permission: bool, access_details: dict)
+    Unified permission checking function that handles all access control logic.
+    Organization checks are performed for org-level roles but not for attribute-based permissions.
     """
+    from database import get_db_cursor  # Import here to avoid circular imports
+    
     user_roles = user_info.get('roles', [])
     user_id = user_info.get('user_id')
+    user_org_id = user_info.get('organisation_id')
+    
     access_details = {
+        'permission_checked': permission_name,
         'checks_performed': [],
         'access_granted_by': None,
         'reason': None,
@@ -628,29 +626,83 @@ def user_has_permission(user_info, permission_name, resource_type=None, resource
         access_details['reason'] = 'User has system-admin role'
         return True, access_details
 
-    # 2. Check standard roles (no org check)
-    access_details['checks_performed'].append('role_check')
+    # 2. Check standard org roles (WITH organization check)
+    access_details['checks_performed'].append('org_role_check')
+    org_roles = ['agari-org-owner', 'agari-org-admin', 'agari-org-contributor', 'agari-org-viewer']
+    
     for required_role in required_roles:
-        if not required_role.startswith('attr-'):
-            if required_role in user_roles:
-                access_details['access_granted_by'] = f'role:{required_role}'
-                access_details['reason'] = f'User has role "{required_role}"'
+        if required_role in org_roles and required_role in user_roles:
+            
+            # For org roles, user MUST have an organization
+            if not user_org_id:
+                access_details['reason'] = f'User has org role "{required_role}" but no organisation_id assigned'
+                continue  # Skip to next role check
+            
+            # For org roles, we need to check if the resource belongs to the user's organization
+            if resource_id and resource_type and user_org_id:
+                try:
+                    with get_db_cursor() as cursor:
+                        if resource_type == 'project':
+                            cursor.execute("""
+                                SELECT organisation_id FROM projects 
+                                WHERE id = %s AND deleted_at IS NULL
+                            """, (resource_id,))
+                        elif resource_type == 'study':
+                            cursor.execute("""
+                                SELECT p.organisation_id FROM studies s
+                                JOIN projects p ON s.project_id = p.id
+                                WHERE s.id = %s AND s.deleted_at IS NULL AND p.deleted_at IS NULL
+                            """, (resource_id,))
+                        else:
+                            # For other resource types or no resource, allow org role
+                            access_details['access_granted_by'] = f'org_role:{required_role}'
+                            access_details['reason'] = f'User has org role "{required_role}" (no resource check needed)'
+                            return True, access_details
+                        
+                        result = cursor.fetchone()
+                        if result:
+                            resource_org_id = result['organisation_id']
+                            
+                            # Check if user_org_id is in the list or matches directly
+                            user_has_org_access = False
+                            if isinstance(user_org_id, list):
+                                user_has_org_access = resource_org_id in user_org_id
+                            else:
+                                user_has_org_access = resource_org_id == user_org_id
+                            
+                            if user_has_org_access:
+                                access_details['access_granted_by'] = f'org_role:{required_role}'
+                                access_details['reason'] = f'User has org role "{required_role}" and resource belongs to user\'s organisation'
+                                return True, access_details
+                            else:
+                                access_details['reason'] = f'User has org role "{required_role}" but resource belongs to different organisation'
+                        else:
+                            access_details['reason'] = f'Resource not found for organisation check'
+                            
+                except Exception as e:
+                    access_details['reason'] = f'Database error during organisation check: {str(e)}'
+            else:
+                # No resource to check, allow org role (e.g., listing resources)
+                access_details['access_granted_by'] = f'org_role:{required_role}'
+                access_details['reason'] = f'User has org role "{required_role}" (no resource specified)'
                 return True, access_details
 
-    # 3. Check attribute-based roles (attr-project-admin, attr-project-contributor, etc.)
+    # 3. Check attribute-based roles (NO organization check - project-specific permissions)
     if resource_id and user_id:
         access_details['checks_performed'].append('attribute_role_check')
         for required_role in required_roles:
             if required_role.startswith('attr-'):
-                attribute_name = required_role[5:]
+                attribute_name = required_role[5:]  # Remove 'attr-' prefix
                 access_details['attribute_checks'].append({
                     'attribute_name': attribute_name,
                     'resource_id': resource_id,
                     'checked': True
                 })
+                
                 user_attributes = user_info.get('attributes', {})
                 has_attribute = False
-                # First, check for the attribute on the resource itself
+                
+                # Check for the attribute on the resource itself
                 if attribute_name in user_attributes:
                     attr_values = user_attributes[attribute_name]
                     if isinstance(attr_values, list):
@@ -660,6 +712,7 @@ def user_has_permission(user_info, permission_name, resource_type=None, resource
                     access_details['attribute_checks'][-1]['jwt_check'] = 'found' if has_attribute else 'not_found'
                 else:
                     access_details['attribute_checks'][-1]['jwt_check'] = 'attribute_not_in_jwt'
+                
                 # If not found and this is a study, check for project-level attribute
                 if not has_attribute and resource_type == 'study' and parent_project_id:
                     # Map study attribute to project attribute (e.g., study-admin -> project-admin)
@@ -675,12 +728,10 @@ def user_has_permission(user_info, permission_name, resource_type=None, resource
                             access_details['attribute_checks'][-1]['project_jwt_check'] = 'found' if has_attribute else 'not_found'
                         else:
                             access_details['attribute_checks'][-1]['project_jwt_check'] = 'attribute_not_in_jwt'
+                
                 if has_attribute:
                     access_details['access_granted_by'] = f'attribute:{attribute_name}'
-                    if resource_type == 'study' and parent_project_id and not (attribute_name in user_attributes and (resource_id in user_attributes.get(attribute_name, []) or str(user_attributes.get(attribute_name)) == resource_id)):
-                        access_details['reason'] = f'User has project attribute for parent project {parent_project_id}'
-                    else:
-                        access_details['reason'] = f'User has attribute "{attribute_name}" for resource {resource_id}'
+                    access_details['reason'] = f'User has project-specific attribute "{attribute_name}" for resource {resource_id}'
                     return True, access_details
                 else:
                     access_details['attribute_checks'][-1]['result'] = 'not_found'
@@ -694,14 +745,25 @@ def require_permission(permission_name, resource_type=None, resource_id_arg=None
         @wraps(f)
         def wrapper(*args, **kwargs):
             user_info = extract_user_info(request.user)
-            # For POST /studies, resource_id and parent_project_id come from the request body
-            if resource_type == 'study' and request.method == 'POST':
+            
+            # Extract resource_id and parent_project_id
+            resource_id = None
+            parent_project_id = None
+            
+            # First try to get from URL parameters (kwargs)
+            if resource_id_arg:
+                resource_id = kwargs.get(resource_id_arg)
+            if parent_project_id_arg:
+                parent_project_id = kwargs.get(parent_project_id_arg)
+            
+            # If not found in URL and we have a POST request, try JSON body
+            if not resource_id and request.method == 'POST' and resource_id_arg:
                 data = request.get_json() or {}
-                resource_id = data.get('studyId')
-                parent_project_id = data.get('projectId')
-            else:
-                resource_id = kwargs.get(resource_id_arg) if resource_id_arg else None
-                parent_project_id = kwargs.get(parent_project_id_arg) if parent_project_id_arg else None
+                resource_id = data.get(resource_id_arg)
+            
+            if not parent_project_id and request.method == 'POST' and parent_project_id_arg:
+                data = request.get_json() or {}
+                parent_project_id = data.get(parent_project_id_arg)
 
             has_perm, details = user_has_permission(
                 user_info,
