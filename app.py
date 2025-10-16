@@ -1250,15 +1250,15 @@ class StudyAnalysis(Resource):
         except Exception as e:
             return {'error': f'Failed to retrieve analysis results: {str(e)}'}, 500
 
-@study_ns.route('/<string:study_id>/analysis/<string:analysis_id>/upload')
+@study_ns.route('/<string:project_id>/<string:study_id>/analysis/<string:analysis_id>/upload')
 class StudyAnalysisUpload(Resource):
-    
-    ### POST /studies/<study_id>/analysis/<analysis_id>/upload ###
+
+    ### POST /studies/<project_id>/<study_id>/analysis/<analysis_id>/upload ###
 
     @study_ns.doc('upload_analysis_file')
     @require_auth(keycloak_auth)
-    @require_permission('submit_to_study', resource_type='study')
-    def post(self, study_id, analysis_id):
+    @require_permission('submit_to_study', resource_type='project', resource_id_arg='project_id')
+    def post(self, project_id, study_id, analysis_id):
 
         """Upload a file to an analysis in SCORE and MINIO (proxy endpoint)"""
 
@@ -1372,6 +1372,7 @@ class StudyAnalysisUpload(Resource):
             return {
                 'message': 'File uploaded successfully',
                 'study_id': study_id,
+                'project_id': project_id,
                 'analysis_id': analysis_id,
                 'object_id': object_id,
                 'filename': file.filename,
