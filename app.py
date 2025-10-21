@@ -443,73 +443,10 @@ class UserList(Resource):
         except Exception as e:
             return {'error': f'Failed to retrieve users: {str(e)}'}, 500
 
-    ### PUT /users ###
-    @user_ns.doc('update_user')
-    @require_auth(keycloak_auth)
-    @require_permission('change_org_member_roles')
-    def put(self):
-        """Update a user's attributes (system-admin only)
-
-        Request Body:
-        {
-            "user_id": "<keycloak_user_id>",
-            "attributes": {
-                "agari-org-owner": ["org_id1", "org_id2"],
-                "agari-org-admin": ["org_id1"],
-                "agari-org-viewer": ["org_id2"],
-                "project-admin": ["project_id1"],
-                "project-contributor": ["project_id1", "project_id2"],
-                "project-viewer": ["project_id2"],
-                "organisation_id": ["org_id1"]
-            },
-            "realmRoles": ["role1", "role2"] 
-        }
-        """
-        try:
-            data = request.get_json()
-            if not data:
-                return {'error': 'No JSON data provided'}, 400
-            
-            user_id = data.get('user_id')
-            attributes = data.get('attributes')
-            realm_roles = data.get('realmRoles')
-
-            if not user_id:
-                return {'error': 'user_id is required'}, 400
-
-            # Check if user exists in Keycloak
-            user = keycloak_auth.get_user(user_id)
-            if not user:
-                return {'error': 'User not found in Keycloak'}, 404
-
-            # Update each attribute
-            if realm_roles is not None:
-                if not isinstance(realm_roles, list):
-                    return {'error': 'realmRoles must be a list'}, 400
-                keycloak_auth.update_realm_roles(user_id, realm_roles)
-
-            if attributes is not None:
-                for attr, values in attributes.items():
-                    if not isinstance(values, list):
-                        return {'error': f'Attribute values for {attr} must be a list'}, 400
-
-                # Remove existing values for the attribute
-                existing_values = user.get('attributes', {}).get(attr, [])
-                for val in existing_values:
-                    keycloak_auth.remove_attribute_value(user_id, attr, val)
-                
-                # Add new values
-                for val in values:
-                    keycloak_auth.add_attribute_value(user_id, attr, val)
-            
-            return {'message': 'User details updated successfully'}, 200
-
-        except Exception as e:
-            return {'error': f'Failed to update user: {str(e)}'}, 500
-
+    ### POST /users ###
     @user_ns.doc('create_user')
     @require_auth(keycloak_auth)
-    @require_permission('change_org_member_roles')
+    @require_permission('create_user')
     def post(self):
         data = request.get_json()
         if not data:
@@ -560,6 +497,362 @@ class UserList(Resource):
             return {
                 'error': f'Failed to create magic link.'
             }, 500
+
+@user_ns.route('/<string:user_id>')        
+class User(Resource):
+
+    ### GET /users/<user_id> ###
+
+    @user_ns.doc('get_user')
+    @require_auth(keycloak_auth)
+    def get(self, user_id):
+        """Get user details by ID
+        
+        Users can view their own profile.
+        Admins can view any user's profile.
+        """
+
+        try:
+            # Get current user info
+            user_info = extract_user_info(request.user)
+            current_user_id = user_info.get('user_id')
+            
+            # Check if user is trying to view their own profile
+            is_self_view = current_user_id == user_id
+            
+            # Check permissions - allow self-view or admin access
+            if not is_self_view:
+                has_perm, details = user_has_permission(user_info, 'manage_users')
+                if not has_perm:
+                    return {'error': 'Permission denied. You can only view your own profile or need admin permissions.', 'details': details}, 403
+            
+            return user_info
+            
+        except Exception as e:
+            return {'error': f'Failed to retrieve user: {str(e)}'}, 500
+
+    ### DELETE /users/<user_id> ###
+
+    @user_ns.doc('delete_user')
+    @require_auth(keycloak_auth)
+    @require_permission('manage_users')
+    def delete(self, user_id):
+        """Delete a user by ID (system-admin only)"""
+
+        try:
+            keycloak_auth.delete_user(user_id)
+            return {'message': 'User deleted successfully'}, 204
+        except Exception as e:
+            return {'error': f'Failed to delete user: {str(e)}'}, 500
+        
+    ### PUT /users/<user_id> ###
+
+    @user_ns.doc('update_user')
+    @require_auth(keycloak_auth)
+    def put(self, user_id):
+        """Update user details by ID
+        
+        Admins can update any user's details.
+        Users can only update their own basic profile fields: name, surame, email, title, bio
+        """
+        
+        try:
+            data = request.get_json()
+            if not data:
+                return {'error': 'No JSON data provided'}, 400
+            
+            # Get current user info
+            user_info = extract_user_info(request.user)
+            current_user_id = user_info.get('user_id')
+            
+            # Check if user is trying to edit their own profile
+            is_self_edit = current_user_id == user_id
+            
+            # Check permissions
+            if not is_self_edit:
+                # Not editing own profile - need admin permissions
+                has_perm, details = user_has_permission(user_info, 'manage_users')
+
+                organisation_id = user_info.get('organisation_id')[0]
+
+                requested_user_info = keycloak_auth.get_user_info_by_id(user_id)
+                request_user_organisation_id = requested_user_info.get('organisation_id')[0]
+
+                has_org_perm = organisation_id == request_user_organisation_id
+
+                if not has_perm and not has_org_perm:
+                    return {'error': 'Permission denied. You can only edit your own profile or need admin permissions.', 'details': details}, 403
+            
+            # Define allowed fields for self-editing
+            self_edit_allowed_fields = {'name', 'surname', 'email', 'title', 'bio'}
+            
+            # Filter update data based on permissions
+            if is_self_edit:
+                # User editing their own profile - filter to allowed fields only
+                filtered_data = {}
+                for key, value in data.items():
+                    if key in self_edit_allowed_fields:
+                        filtered_data[key] = value
+                    else:
+                        return {'error': f'Field "{key}" not allowed for self-editing. Allowed fields: {", ".join(self_edit_allowed_fields)}'}, 400
+                
+                if not filtered_data:
+                    return {'error': f'No valid fields provided. Allowed fields for self-editing: {", ".join(self_edit_allowed_fields)}'}, 400
+                    
+                update_data = filtered_data
+            else:
+                # Admin editing user - allow all fields
+                update_data = data
+            
+            # Call the auth update_user method
+            result = keycloak_auth.update_user(user_id, update_data)
+            
+            if result.get('success'):
+                return {
+                    'message': 'User updated successfully',
+                    'user_id': user_id,
+                    'updates': result.get('updates', {}),
+                    'is_self_edit': is_self_edit
+                }
+            else:
+                return {
+                    'error': 'Failed to update user',
+                    'details': result.get('error'),
+                    'errors': result.get('errors', {})
+                }, 500
+                
+        except Exception as e:
+            return {'error': f'Failed to update user: {str(e)}'}, 500
+
+##########################
+### ORGANISATIONS
+##########################
+
+organisation_ns = api.namespace('organisations', description='Organisation management endpoints')
+@organisation_ns.route('/')
+class OrganisationList(Resource):
+    
+    ### GET /organisations ###
+
+    @organisation_ns.doc('list_organisations')
+    @require_auth(keycloak_auth)
+    def get(self):
+
+        """List all organisations"""
+        
+        try:
+            with get_db_cursor() as cursor:
+                cursor.execute("""
+                    SELECT *
+                    FROM organisations
+                    ORDER BY name
+                """)
+                
+                organisations = cursor.fetchall()
+                return organisations
+
+        except Exception as e:
+            return {'error': f'Database error: {str(e)}'}, 500
+        
+
+    ### POST /organisations ###
+
+    @organisation_ns.doc('create_organisation')
+    @require_auth(keycloak_auth)
+    @require_permission('create_org')
+    def post(self):
+        
+        """Create a new organisation"""
+        
+        try:
+            data = request.get_json()
+            if not data:
+                return {'error': 'No JSON data provided'}, 400
+            
+            name = data.get('name')
+            abbreviation = data.get('abbreviation')
+            url = data.get('url')
+            about = data.get('about')
+            
+            if not name:
+                return {'error': 'Organisation name is required'}, 400
+            
+            with get_db_cursor() as cursor:
+                cursor.execute("""
+                    INSERT INTO organisations (name, abbreviation, url, about)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING *
+                """, (name, abbreviation, url, about))
+                
+                new_org = cursor.fetchone()
+                
+                return {
+                    'message': 'Organisation created successfully',
+                    'organisation': new_org
+                }, 201
+            
+        except Exception as e:
+            if 'duplicate key value violates unique constraint' in str(e):
+                return {'error': f'Organisation with name "{name}" already exists'}, 409
+            return {'error': f'Database error: {str(e)}'}, 500
+
+    
+
+@organisation_ns.route('/<string:org_id>')
+class Organisation(Resource):
+
+    ### GET /organisations/<id> ###
+    
+    @organisation_ns.doc('get_organisation')
+    def get(self, org_id):
+
+        """Get organisation details by ID"""
+        
+        try:
+            with get_db_cursor() as cursor:
+                cursor.execute("""
+                    SELECT *
+                    FROM organisations
+                    WHERE id = %s
+                """, (org_id,))
+                
+                organisation = cursor.fetchone()
+                
+                if not organisation:
+                    return {'error': 'Organisation not found'}, 404
+                
+                return organisation
+                
+        except Exception as e:
+            return {'error': f'Database error: {str(e)}'}, 500
+        
+    ### PUT /organisations/<id> ###
+    @organisation_ns.doc('update_organisation')
+    @require_auth(keycloak_auth)
+    @require_permission('manage_org_settings')
+    def put(self, org_id):
+
+        """Update organisation details by ID"""
+
+        # Extract user info to get the organisation_id
+        user_info = extract_user_info(request.user)
+        user_org_id = user_info.get('organisation_id')[0]
+
+        # system-admin
+        if user_info.get('roles') and 'system-admin' in user_info.get('roles'):
+            pass
+        # org-admin or org-owner
+        elif user_org_id == org_id:
+            pass
+        else:
+            return {'error': 'Permission denied. You can only update your own organisation or need system-admin permissions.'}, 403
+
+        
+        try:
+            data = request.get_json()
+            if not data:
+                return {'error': 'No JSON data provided'}, 400
+            
+            # Build dynamic update query based on provided fields
+            update_fields = []
+            update_values = []
+            
+            if 'name' in data:
+                update_fields.append('name = %s')
+                update_values.append(data['name'])
+                
+            if 'abbreviation' in data:
+                update_fields.append('abbreviation = %s')
+                update_values.append(data['abbreviation'])
+                
+            if 'url' in data:
+                update_fields.append('url = %s')
+                update_values.append(data['url'])
+                
+            if 'about' in data:
+                update_fields.append('about = %s')
+                update_values.append(data['about'])
+            
+            if not update_fields:
+                return {'error': 'No valid fields provided for update'}, 400
+            
+            # Always update the updated_at timestamp
+            update_fields.append('updated_at = NOW()')
+            update_values.append(org_id)
+
+            with get_db_cursor() as cursor:
+                query = f"""
+                    UPDATE organisations
+                    SET {', '.join(update_fields)}
+                    WHERE id = %s
+                    RETURNING *
+                """
+                
+                cursor.execute(query, update_values)
+                
+                updated_org = cursor.fetchone()
+                
+                if not updated_org:
+                    return {'error': 'Organisation not found'}, 404
+                
+                return {
+                    'message': 'Organisation updated successfully',
+                    'organisation': updated_org
+                }
+                
+        except Exception as e:
+            if 'duplicate key value violates unique constraint' in str(e):
+                return {'error': f'Organisation name already exists'}, 409
+            return {'error': f'Database error: {str(e)}'}, 500
+        
+    ### DELETE /organisations/<id> ###
+    @organisation_ns.doc('delete_organisation')
+    @require_auth(keycloak_auth)
+    @require_permission('delete_org')
+    def delete(self, org_id):
+
+        """Delete an organisation by ID"""
+
+        try:
+            with get_db_cursor() as cursor:
+                cursor.execute("""
+                    DELETE FROM organisations
+                    WHERE id = %s
+                    RETURNING id, name
+                """, (org_id,))
+                
+                deleted_org = cursor.fetchone()
+                
+                if not deleted_org:
+                    return {'error': 'Organisation not found'}, 404
+                
+                return {
+                    'message': f'Organisation "{deleted_org["name"]}" deleted successfully'
+                }, 204
+                
+        except Exception as e:
+            return {'error': f'Database error: {str(e)}'}, 500
+
+        
+    
+@organisation_ns.route('/<string:org_id>/members')
+class OrganisationUsers(Resource):
+
+    ### GET /organisations/<org_id>/users ###
+
+    @organisation_ns.doc('list_organisation_users')
+    @require_auth(keycloak_auth)
+    @require_permission('view_org_members')
+    def get(self, org_id):
+
+        """List all users in an organisation"""
+        
+        try:
+            users = keycloak_auth.get_users_by_attribute('organisation_id', org_id)
+            return users
+        except Exception as e:
+            return {'error': f'Failed to retrieve users: {str(e)}'}, 500
+
 
 ##########################
 ### PROJECTS

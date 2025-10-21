@@ -1,6 +1,6 @@
-#@folio = http://localhost:5000
-@folio = https://folio-staging.openup.org.za
-@keycloak = https://keycloak-staging.openup.org.za
+@folio = http://localhost:5000
+# @folio = https://folio-staging.openup.org.za
+@keycloak = http://keycloak.local
 
 
 
@@ -8,8 +8,8 @@
 @client_id = dms
 @client_secret = VDyLEjGR3xDQvoQlrHq5AB6OwbW0Refc
 
-# @username = system.admin@agari.tech
-@username = owner@org1.ac.za
+@username = system.admin@agari.tech
+# @username = owner@org1.ac.za
 # @username = owner@org2.ac.za
 # @username = org-admin@org1.ac.za
 # @username = org-admin@org2.ac.za
@@ -19,6 +19,8 @@
 
 
 @password = pass123
+
+@testuser1 = a056925c-4d53-417f-a9f6-45e4421654cc
 
 ### 1. LOGIN to get access token
 # @name login
@@ -112,6 +114,87 @@ Content-Type: application/json
 }
 
 ##########################
+### USERS
+##########################
+
+# @name get_current_user
+GET {{folio}}/info/whoami
+Authorization: Bearer {{token}}
+
+###
+
+# @name get_user_by_id
+GET {{folio}}/users/{{testuser1}}
+Authorization: Bearer {{token}}
+
+###
+
+# @name update_user_by_id
+PUT {{folio}}/users/{{testuser1}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "bio": "5"
+}
+
+##########################
+## ORGANISATIONS
+##########################
+
+
+# @name list_organisations
+GET {{folio}}/organisations
+Authorization: Bearer {{token}}
+
+###
+
+# @name create_organisation
+POST {{folio}}/organisations
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "name": "Organisation 1",
+    "abbreviation": "org1",
+    "about": "Organisation 1",
+    "url": "https://org1.example.com"
+}
+
+###
+
+@organisation_id = 783b767c-c41e-4a6a-9132-ea52fadb8e17
+
+# @name get_organisation
+GET {{folio}}/organisations/{{organisation_id}}
+Authorization: Bearer {{token}}
+
+###
+
+# @name update_organisation
+PUT {{folio}}/organisations/{{organisation_id}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "about": "Updated Organisation 3"
+}
+
+###
+
+# @name delete_organisation
+DELETE {{folio}}/organisations/{{organisation_id}}
+Authorization: Bearer {{token}}
+
+###
+
+# @name organisation_users
+GET {{folio}}/organisations/{{organisation_id}}/members
+Authorization: Bearer {{token}}
+
+
+
+##########################
 ### PATHOGENS
 ##########################
 
@@ -198,7 +281,7 @@ Content-Type: application/json
 
 ###
 
-@project_id = 8772fbeb-5c94-41d6-8159-48290874378b
+@project_id = f06ed779-e92b-4cc8-b671-d1188429bf8a
 
 ### @name get_project
 GET {{folio}}/projects/{{project_id}}
@@ -272,7 +355,7 @@ Authorization: Bearer {{token}}
 
 ###
 
-@study_id = study-003
+@study_id = study-007
 
 # @name create_study
 POST {{folio}}/studies/
@@ -306,12 +389,13 @@ Authorization: Bearer {{token}}
 ###
 
 # @name submitAnalysis
-POST {{folio}}/studies/submit/{{study_id}}/
+POST {{folio}}/studies/submit/{{project_id}}/{{study_id}}/
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-  "studyId": "study-003",
+  "allowDuplicates": true,
+  "studyId": "{{study_id}}",
   "analysisId": "analysis001",
   "analysisType": {
     "name": "sequencingRead",
@@ -331,7 +415,7 @@ Content-Type: application/json
         "tumourNormalDesignation": "Normal"
       },
       "donor": {
-        "studyId": "study-003",
+        "studyId": "{{study_id}}",
         "donorId": "D001",
         "submitterDonorId": "D001",
         "gender": "Female"
