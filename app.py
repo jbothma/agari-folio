@@ -1336,32 +1336,6 @@ class ProjectUsers(Resource):
                 return {'error': 'User not found in Keycloak'}, 404
 
             invite_user_to_project(user, project_id, role)
-            # Remove user from all existing project roles first (role hierarchy enforcement)
-            removed_roles = []
-            for existing_role in ['project-admin', 'project-contributor', 'project-viewer']:
-                if keycloak_auth.user_has_attribute(user_id, existing_role, project_id):
-                    success = keycloak_auth.remove_attribute_value(user_id, existing_role, project_id)
-                    if success:
-                        removed_roles.append(existing_role)
-                        print(f"Removed project_id {project_id} from role {existing_role} for user {user_id}")
-                    else:
-                        return {'error': f'Failed to remove existing role {existing_role}'}, 500
-            
-            # Add the user to the new role
-            success = keycloak_auth.add_attribute_value(user_id, role, project_id)
-            if not success:
-                return {'error': f'Failed to add user to role {role}'}, 500
-            
-            print(f"Added project_id {project_id} to role {role} for user {user_id}")
-
-            return {
-                'message': 'User added to project successfully',
-                'user_id': user_id,
-                'project_id': project_id,
-                'new_role': role,
-                'removed_roles': removed_roles
-            }, 200
-
         except Exception as e:
             return {'error': f'Failed to add user to project: {str(e)}'}, 500
 
