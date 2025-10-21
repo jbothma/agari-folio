@@ -868,38 +868,120 @@ class ProjectList(Resource):
     @api.doc('list_projects')
     def get(self):
         
-        """List projects based on user permissions"""
+        """List projects based on user permissions with filtering and pagination
+        
+        Query Parameters:
+        - organisation_id: Filter by organisation ID
+        - pathogen_id: Filter by pathogen ID
+        - page: Page number (default: 1)
+        - limit: Items per page (default: 20, max: 100)
+        - search: Search in project name and description
+        """
 
         organisation_id = keycloak_auth.get_user_org()
+        
+        # Get query parameters
+        filter_org_id = request.args.get('organisation_id')
+        filter_pathogen_id = request.args.get('pathogen_id')
+        search_term = request.args.get('search')
+        
+        # Pagination parameters
+        try:
+            page = int(request.args.get('page', 1))
+            limit = min(int(request.args.get('limit', 20)), 100)  
+            offset = (page - 1) * limit
+        except ValueError:
+            return {'error': 'Invalid page or limit parameter'}, 400
+
+        if page < 1 or limit < 1:
+            return {'error': 'Page and limit must be positive integers'}, 400
 
         try:
-                
             with get_db_cursor() as cursor:
-                    
-                if organisation_id is not None:
-                    cursor.execute("""
-                        SELECT *
-                        FROM projects
-                        WHERE deleted_at IS NULL
-                        AND (privacy = 'public' or privacy = 'semi-private' OR organisation_id = %s)
-                        ORDER BY name
-                    """, (organisation_id,))
-                    
-                else:
-                    cursor.execute("""
-                        SELECT *
-                        FROM projects
-                        WHERE deleted_at IS NULL
-                        AND (privacy = 'public' or privacy = 'semi-private')
-                        ORDER BY name
-                    """)
-
-                projects = cursor.fetchall()
-                print(f"Found {len(projects)} projects")
-                for p in projects:
-                    print(f"Project '{p['name']}' - org: '{p['organisation_id']}', privacy: '{p['privacy']}'")
+                base_conditions = ["p.deleted_at IS NULL"]
+                params = []
                 
-                return projects
+                if organisation_id is not None:
+                    base_conditions.append("(p.privacy = 'public' OR p.privacy = 'semi-private' OR p.organisation_id = %s)")
+                    params.append(organisation_id)
+                else:
+                    base_conditions.append("(p.privacy = 'public' OR p.privacy = 'semi-private')")
+                
+                # Add additional filters
+                if filter_org_id:
+                    base_conditions.append("p.organisation_id = %s")
+                    params.append(filter_org_id)
+                
+                if filter_pathogen_id:
+                    # Validate UUID format before using in query
+                    try:
+                        import uuid
+                        uuid.UUID(filter_pathogen_id)  # This will raise ValueError if invalid UUID
+                        base_conditions.append("p.pathogen_id = %s")
+                        params.append(filter_pathogen_id)
+                    except ValueError:
+                        return {'error': f'Invalid pathogen_id format: {filter_pathogen_id}. Must be a valid UUID.'}, 400
+
+                if search_term:
+                    base_conditions.append("(p.name ILIKE %s OR p.description ILIKE %s)")
+                    search_pattern = f"%{search_term}%"
+                    params.extend([search_pattern, search_pattern])
+                
+                where_clause = " AND ".join(base_conditions)
+                
+                # Get total count for pagination metadata
+                count_query = f"""
+                    SELECT COUNT(*) as total
+                    FROM projects p
+                    WHERE {where_clause}
+                """
+                cursor.execute(count_query, params)
+                total_count = cursor.fetchone()['total']
+                
+                # Get paginated results with joins for additional info
+                main_query = f"""
+                    SELECT 
+                        p.*,
+                        pat.name as pathogen_name,
+                        pat.scientific_name as pathogen_scientific_name,
+                        org.name as organisation_name,
+                        org.abbreviation as organisation_abbreviation
+                    FROM projects p
+                    LEFT JOIN pathogens pat ON p.pathogen_id::uuid = pat.id::uuid
+                    LEFT JOIN organisations org ON p.organisation_id::uuid = org.id::uuid
+                    WHERE {where_clause}
+                    ORDER BY p.name
+                    LIMIT %s OFFSET %s
+                """
+                
+                cursor.execute(main_query, params + [limit, offset])
+                projects = cursor.fetchall()
+                
+                # Calculate pagination metadata
+                total_pages = (total_count + limit - 1) // limit  # Ceiling division
+                has_next = page < total_pages
+                has_prev = page > 1
+                
+                print(f"Found {len(projects)} projects (page {page}/{total_pages}, total: {total_count})")
+                for p in projects:
+                    print(f"Project '{p['name']}' - org: '{p['organisation_id']}', pathogen: '{p['pathogen_name']}', privacy: '{p['privacy']}'")
+                
+                return {
+                    'projects': projects,
+                    'pagination': {
+                        'page': page,
+                        'limit': limit,
+                        'total_count': total_count,
+                        'total_pages': total_pages,
+                        'has_next': has_next,
+                        'has_prev': has_prev
+                    },
+                    'filters': {
+                        'organisation_id': filter_org_id,
+                        'pathogen_id': filter_pathogen_id,
+                        'search': search_term
+                    }
+                }
 
         except Exception as e:
             return {'error': f'Database error: {str(e)}'}, 500
