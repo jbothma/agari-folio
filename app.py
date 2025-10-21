@@ -879,6 +879,16 @@ class ProjectList(Resource):
         """
 
         organisation_id = keycloak_auth.get_user_org()
+
+        if organisation_id is not None:
+            try:
+                import uuid
+                if isinstance(organisation_id, str):
+                    uuid.UUID(organisation_id) 
+                else:
+                    organisation_id = None 
+            except (ValueError, TypeError):
+                organisation_id = None
         
         # Get query parameters
         filter_org_id = request.args.get('organisation_id')
