@@ -880,19 +880,6 @@ class ProjectList(Resource):
 
         organisation_id = keycloak_auth.get_user_org()
 
-        if organisation_id is not None:
-            try:
-                import uuid
-                if isinstance(organisation_id, str):
-                    uuid.UUID(organisation_id) 
-                else:
-                    organisation_id = None 
-            except (ValueError, TypeError):
-                organisation_id = None
-
-            if organisation_id == 'system':
-                organisation_id = None
-        
         # Get query parameters
         filter_org_id = request.args.get('organisation_id')
         filter_pathogen_id = request.args.get('pathogen_id')
@@ -961,7 +948,7 @@ class ProjectList(Resource):
                         org.abbreviation as organisation_abbreviation
                     FROM projects p
                     LEFT JOIN pathogens pat ON p.pathogen_id::uuid = pat.id::uuid
-                    LEFT JOIN organisations org ON p.organisation_id::uuid = org.id::uuid
+                    LEFT JOIN organisations org ON p.organisation_id = org.id::text
                     WHERE {where_clause}
                     ORDER BY p.name
                     LIMIT %s OFFSET %s
