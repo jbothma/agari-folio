@@ -883,11 +883,14 @@ class ProjectList(Resource):
         if organisation_id is not None:
             try:
                 import uuid
-                if isinstance(organisation_id, str) and organisation_id != 'system':
+                if isinstance(organisation_id, str):
                     uuid.UUID(organisation_id) 
                 else:
                     organisation_id = None 
             except (ValueError, TypeError):
+                organisation_id = None
+
+            if organisation_id == 'system':
                 organisation_id = None
         
         # Get query parameters
