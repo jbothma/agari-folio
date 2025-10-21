@@ -883,7 +883,7 @@ class ProjectList(Resource):
         if organisation_id is not None:
             try:
                 import uuid
-                if isinstance(organisation_id, str):
+                if isinstance(organisation_id, str) and organisation_id != 'system':
                     uuid.UUID(organisation_id) 
                 else:
                     organisation_id = None 
