@@ -164,6 +164,7 @@ Content-Type: application/json
 ###
 
 @organisation_id = 783b767c-c41e-4a6a-9132-ea52fadb8e17
+# @organisation_id = 6fb55e17-8b29-4668-8b31-f9dbdd4bc6c7
 
 # @name get_organisation
 GET {{folio}}/organisations/{{organisation_id}}
@@ -221,7 +222,7 @@ Content-Type: application/json
 
 ###
 
-@pathogen_id = 0683f0f6-04b3-4005-a078-383d0e3e88f2
+@pathogen_id = 11f1f225-3b62-4cea-b357-33fa12f018ba
 
 # @name get_pathogen
 GET {{folio}}/pathogens/{{pathogen_id}}
@@ -262,7 +263,7 @@ Authorization: Bearer {{token}}
 ##########################
 
 # @name list_projects
-GET {{folio}}/projects
+GET {{folio}}/projects?search=cholera
 Authorization: Bearer {{token}}
 
 ###
