@@ -948,7 +948,7 @@ class ProjectList(Resource):
                         org.abbreviation as organisation_abbreviation
                     FROM projects p
                     LEFT JOIN pathogens pat ON p.pathogen_id::uuid = pat.id::uuid
-                    LEFT JOIN organisations org ON p.organisation_id = org.id::text
+                    LEFT JOIN organisations org ON p.organisation_id::text = org.id::text
                     WHERE {where_clause}
                     ORDER BY p.name
                     LIMIT %s OFFSET %s
