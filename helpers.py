@@ -8,7 +8,10 @@ from sendgrid.helpers.mail import Mail, From, To
 
 # from app import keycloak_auth
 
-sg_api_key = os.getenv("SENDGRID_API_KEY", "")
+sg_api_key = os.getenv(
+    "SENDGRID_API_KEY",
+    "",
+)
 sg_from_email = os.getenv("SENDGRID_FROM_EMAIL", "webapps+agaridev@openup.org.za")
 sg_from_name = os.getenv("SENDGRID_FROM_NAME", "AGARI")
 frontend_url = os.getenv("FRONTEND_URL", "https://agari-staging.openup.org.za")
@@ -26,11 +29,10 @@ keycloak_auth = KeycloakAuth(
 
 
 def invite_user_to_project(user, project_id, role):
-    # user = json.dumps(data.get("user_id"))
     to_email = user["email"]
     to_name = user["firstName"] + " " + user["lastName"]
     project_name = "test proj"  # project.get("name")
-    subject = f"You've been invited to join {project_name} on AGARI"
+    subject = "You've been invited to AGARI"
 
     import hashlib
 
