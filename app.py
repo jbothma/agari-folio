@@ -1839,9 +1839,11 @@ class ProjectUserConfirm(Resource):
         if not data:
             return {'error': 'No JSON data provided'}, 400
 
-        user_id = keycloak_auth.get_users_by_attribute('invite_token', token)[0]['user_id']
-        project_id = keycloak_auth.get_user_attributes('project_id')
-        role = keycloak_auth.get_user_attributes('new_role')
+        user = keycloak_auth.get_users_by_attribute('invite_token', token)[0]
+        user_id = user["user_id"]
+        project_id = user["attributes"].get("project_id", [""])[0]
+        invite_role = user["attributes"].get("invite_role", [""])[0]
+        invite_project_id = user["attributes"].get("invite_project_id", [""])[0]
 
         # Remove user from all existing project roles first (role hierarchy enforcement)
         removed_roles = []
@@ -1855,22 +1857,22 @@ class ProjectUserConfirm(Resource):
                     return {'error': f'Failed to remove existing role {existing_role}'}, 500
 
         # Add the user to the new role
-        success = keycloak_auth.add_attribute_value(user_id, role, project_id)
+        success = keycloak_auth.add_attribute_value(user_id, invite_role, invite_project_id)
         if not success:
-            return {'error': f'Failed to add user to role {role}'}, 500
+            return {'error': f'Failed to add user to role {invite_role}'}, 500
 
-        print(f"Added project_id {project_id} to role {role} for user {user_id}")
+        print(f"Added project_id {project_id} to role {invite_role} for user {user_id}")
 
         # Remove temp attributes
         keycloak_auth.remove_attribute_value(user_id, 'invite_token', token)
-        keycloak_auth.remove_attribute_value(user_id, 'project_id', project_id)
-        keycloak_auth.remove_attribute_value(user_id, 'new_role', role)
+        keycloak_auth.remove_attribute_value(user_id, 'invite_project_id', invite_project_id)
+        keycloak_auth.remove_attribute_value(user_id, 'invite_role', invite_role)
 
         return {
             'message': 'User added to project successfully',
             'user_id': user_id,
             'project_id': project_id,
-            'new_role': role,
+            'new_role': invite_role,
             'removed_roles': removed_roles
         }, 200
 

@@ -1,6 +1,7 @@
 import os
 import subprocess
 import json
+import hashlib
 from flask import render_template_string
 from auth import KeycloakAuth
 from sendgrid import SendGridAPIClient
@@ -29,12 +30,12 @@ keycloak_auth = KeycloakAuth(
 
 
 def invite_user_to_project(user, project_id, role):
+    name = user["attributes"].get("name", [""])[0]
+    surname = user["attributes"].get("surname", [""])[0]
     to_email = user["email"]
-    to_name = user["firstName"] + " " + user["lastName"]
+    to_name = f"{name} {surname}"
     project_name = "test proj"  # project.get("name")
     subject = "You've been invited to AGARI"
-
-    import hashlib
 
     inv_token = hashlib.md5(user["id"].encode()).hexdigest()
     accept_link = f"{frontend_url}/accept-invite?userid={user["id"]}&token={inv_token}"
@@ -61,8 +62,8 @@ def invite_user_to_project(user, project_id, role):
     if response.status_code in [200, 201, 202]:
         # assign temp invite attributes to user
         keycloak_auth.add_attribute_value(user["id"], "invite_token", inv_token)
-        keycloak_auth.add_attribute_value(user["id"], "project_id", project_id)
-        keycloak_auth.add_attribute_value(user["id"], "new_role", role)
+        keycloak_auth.add_attribute_value(user["id"], "invite_project_id", project_id)
+        keycloak_auth.add_attribute_value(user["id"], "invite_role", role)
         return f"Invitation email sent successfully"
     else:
         return {"error": "Failed to send invitation email"}, 500
