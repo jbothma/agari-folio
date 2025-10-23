@@ -673,16 +673,17 @@ class OrganisationList(Resource):
             abbreviation = data.get('abbreviation')
             url = data.get('url')
             about = data.get('about')
+            sharing_policy = data.get('sharing_policy', 'private')
             
             if not name:
                 return {'error': 'Organisation name is required'}, 400
             
             with get_db_cursor() as cursor:
                 cursor.execute("""
-                    INSERT INTO organisations (name, abbreviation, url, about)
-                    VALUES (%s, %s, %s, %s)
+                    INSERT INTO organisations (name, abbreviation, url, about, sharing_policy)
+                    VALUES (%s, %s, %s, %s, %s)
                     RETURNING *
-                """, (name, abbreviation, url, about))
+                """, (name, abbreviation, url, about, sharing_policy))
                 
                 new_org = cursor.fetchone()
                 
