@@ -1801,12 +1801,7 @@ class ProjectUserConfirm(Resource):
 
     @api.doc('accept_project_invite')
     @require_auth(keycloak_auth)
-    @require_permission('manage_project_users', resource_type='project', resource_id_arg='project_id')
     def post(self, token):
-        data = request.get_json()
-        if not data:
-            return {'error': 'No JSON data provided'}, 400
-
         user = keycloak_auth.get_users_by_attribute('invite_token', token)[0]
         user_id = user["user_id"]
 
