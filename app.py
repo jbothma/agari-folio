@@ -683,7 +683,7 @@ class OrganisationList(Resource):
                     INSERT INTO organisations (name, abbreviation, url, about, sharing_policy)
                     VALUES (%s, %s, %s, %s, %s)
                     RETURNING *
-                """, (name, abbreviation, url, about))
+                """, (name, abbreviation, url, about, sharing_policy))
                 
                 new_org = cursor.fetchone()
                 
