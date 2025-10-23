@@ -1297,7 +1297,7 @@ class ProjectUsers(Resource):
 
             if not user_id or role not in ['project-admin', 'project-contributor', 'project-viewer']:
                 return {'error': 'user_id and valid role (project-admin, project-contributor, project-viewer) are required'}, 400
-            
+
             # Check if user exists in Keycloak
             user = keycloak_auth.get_user(user_id)
             if not user:
@@ -1809,7 +1809,14 @@ class ProjectUserConfirm(Resource):
 
         user = keycloak_auth.get_users_by_attribute('invite_token', token)[0]
         user_id = user["user_id"]
-        project_id = user["attributes"].get("project_id", [""])[0]
+
+        project_id = None
+        for role_attr in ['project-admin', 'project-contributor', 'project-viewer']:
+            role_values = user["attributes"].get(role_attr, [])
+            if role_values:
+                project_id = role_values[0]
+                break
+
         invite_role = user["attributes"].get("invite_role", [""])[0]
         invite_project_id = user["attributes"].get("invite_project_id", [""])[0]
 
