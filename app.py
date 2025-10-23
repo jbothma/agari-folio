@@ -455,7 +455,7 @@ class UserList(Resource):
         
         email = data.get('email')
         redirect_uri = data.get('redirect_uri')
-        expiration_seconds = data.get('expiration_seconds', 3600)
+        expiration_seconds = data.get('expiration_seconds', 600)
         send_email = data.get('send_email', True)
 
         if not email:
@@ -1302,7 +1302,8 @@ class ProjectUsers(Resource):
             user = keycloak_auth.get_user(user_id)
             if not user:
                 return {'error': 'User not found in Keycloak'}, 404
-            invite_user_to_project(user, project_id, role)
+            response = invite_user_to_project(user, project_id, role)
+            return response
         except Exception as e:
             return {'error': f'Failed to add user to project: {str(e)}'}, 500
 
@@ -1838,7 +1839,7 @@ class ProjectUserConfirm(Resource):
         return {
             'message': 'User added to project successfully',
             'user_id': user_id,
-            'project_id': project_id,
+            'project_id': invite_project_id,
             'new_role': invite_role,
             'removed_roles': removed_roles
         }, 200
