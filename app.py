@@ -8,7 +8,7 @@ import json
 from datetime import datetime, date
 from decimal import Decimal
 import requests
-from helpers import invite_user_to_project
+from helpers import magic_link, invite_user_to_project
 
 
 # Custom JSON encoder to handle datetime and other types
@@ -463,41 +463,9 @@ class UserList(Resource):
         if not redirect_uri:
             return {'error': 'Redirect is required'}, 400
 
-        admin_token = keycloak_auth.get_admin_token()
-        if not admin_token:
-            return {'error': 'Failed to authenticate with Keycloak admin'}, 500
-        headers = {
-            'Authorization': f'Bearer {admin_token}',
-            'Content-Type': 'application/json'
-        }
-        payload = {
-            'email': email,
-            'client_id': keycloak_auth.client_id,
-            'redirect_uri': redirect_uri,
-            'expiration_seconds': expiration_seconds,
-            'force_create': True,
-            'reusable': False,
-            'send_email': send_email
-        }
-        magic_link_url = f"{keycloak_auth.keycloak_url}/realms/{keycloak_auth.realm}/magic-link"
+        keycloak_response = magic_link(email, expiration_seconds, send_email)
+        return keycloak_response
 
-        keycloak_response = requests.post(
-            magic_link_url,
-            headers=headers,
-            json=payload
-        )
-
-        if keycloak_response.status_code == 200:
-            response_data = keycloak_response.json()
-            return {
-                'message': 'Magic link sent successfully',
-                'email': email,
-                'user_id': response_data.get('user_id'),
-            }, 200
-        else:
-            return {
-                'error': f'Failed to create magic link.'
-            }, 500
 
 @user_ns.route('/<string:user_id>')        
 class User(Resource):
@@ -1334,7 +1302,6 @@ class ProjectUsers(Resource):
             user = keycloak_auth.get_user(user_id)
             if not user:
                 return {'error': 'User not found in Keycloak'}, 404
-
             invite_user_to_project(user, project_id, role)
         except Exception as e:
             return {'error': f'Failed to add user to project: {str(e)}'}, 500

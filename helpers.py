@@ -8,7 +8,6 @@ from auth import KeycloakAuth
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail, From, To
 
-# from app import keycloak_auth
 
 sg_api_key = os.getenv(
     "SENDGRID_API_KEY",
@@ -30,6 +29,27 @@ keycloak_auth = KeycloakAuth(
 )
 
 
+def send_email(to_email, to_name, subject, html_content):
+    message = Mail(
+        from_email=From(sg_from_email, sg_from_name),
+        to_emails=To(to_email, to_name),
+        subject=subject,
+        html_content=html_content,
+    )
+    response = sg.send(message)
+    return response
+
+def mjml_to_html(template_name):
+    result = subprocess.run(
+        ["mjml", f"email_templates/{template_name}.mjml", "--stdout"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    html_template = result.stdout
+    return html_template
+
+
 def magic_link(email, expiration_seconds=3600, send_email=True):
     admin_token = keycloak_auth.get_admin_token()
     if not admin_token:
@@ -45,18 +65,28 @@ def magic_link(email, expiration_seconds=3600, send_email=True):
         "expiration_seconds": expiration_seconds,
         "force_create": True,
         "reusable": False,
-        "send_email": send_email,
+        "send_email": False,
     }
     magic_link_url = (
         f"{keycloak_auth.keycloak_url}/realms/{keycloak_auth.realm}/magic-link"
     )
-
     keycloak_response = requests.post(magic_link_url, headers=headers, json=payload)
+
+    if send_email:
+        # Manually send magic link
+        html_template = mjml_to_html("magic_link")
+        html_content = render_template_string(
+            html_template, magic_link=magic_link_url
+        )
+        send_email(email, "", "Your AGARI sign-in link", html_content)
+        message = "Magic link sent successfully"
+    else:
+        message = "Magic link created successfully (email not sent)"
 
     if keycloak_response.status_code == 200:
         response_data = keycloak_response.json()
         return {
-            "message": "Magic link sent successfully",
+            "message": message,
             "email": email,
             "user_id": response_data.get("user_id"),
         }, 200
@@ -84,24 +114,12 @@ def invite_user_to_project(user, project_id, role):
     inv_token = hashlib.md5(user["id"].encode()).hexdigest()
     accept_link = f"{frontend_url}/accept-invite?userid={user["id"]}&token={inv_token}"
 
-    result = subprocess.run(
-        ["mjml", "email_templates/user_invite.mjml", "--stdout"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    html_template = result.stdout
+    html_template = mjml_to_html("user_invite")
     html_content = render_template_string(
         html_template, project_name=project_name, accept_link=accept_link
     )
 
-    message = Mail(
-        from_email=From(sg_from_email, sg_from_name),
-        to_emails=To(to_email, to_name),
-        subject=subject,
-        html_content=html_content,
-    )
-    response = sg.send(message)
+    response = send_email(to_email, to_name, subject, html_content)
 
     if response.status_code in [200, 201, 202]:
         # assign temp invite attributes to user
