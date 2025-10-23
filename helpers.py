@@ -2,6 +2,7 @@ import os
 import subprocess
 import json
 import hashlib
+import requests
 from flask import render_template_string
 from auth import KeycloakAuth
 from sendgrid import SendGridAPIClient
@@ -29,11 +30,54 @@ keycloak_auth = KeycloakAuth(
 )
 
 
+def magic_link(email, expiration_seconds=3600, send_email=True):
+    admin_token = keycloak_auth.get_admin_token()
+    if not admin_token:
+        return {"error": "Failed to authenticate with Keycloak admin"}, 500
+    headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "email": email,
+        "client_id": keycloak_auth.client_id,
+        "redirect_uri": frontend_url,
+        "expiration_seconds": expiration_seconds,
+        "force_create": True,
+        "reusable": False,
+        "send_email": send_email,
+    }
+    magic_link_url = (
+        f"{keycloak_auth.keycloak_url}/realms/{keycloak_auth.realm}/magic-link"
+    )
+
+    keycloak_response = requests.post(magic_link_url, headers=headers, json=payload)
+
+    if keycloak_response.status_code == 200:
+        response_data = keycloak_response.json()
+        return {
+            "message": "Magic link sent successfully",
+            "email": email,
+            "user_id": response_data.get("user_id"),
+        }, 200
+    else:
+        return {"error": f"Failed to create magic link."}, 500
+
+
+def quiet_create_user(email):
+    keycloak_response = magic_link(email, 0, False)
+
+    return keycloak_response
+
+
 def invite_user_to_project(user, project_id, role):
-    name = user["attributes"].get("name", [""])[0]
-    surname = user["attributes"].get("surname", [""])[0]
+    if user.get("attributes"):
+        name = user["attributes"].get("name", [])[0]
+        surname = user["attributes"].get("surname", [])[0]
+        to_name = f"{name} {surname}"
+    else:
+        to_name = ""
     to_email = user["email"]
-    to_name = f"{name} {surname}"
     project_name = "test proj"  # project.get("name")
     subject = "You've been invited to AGARI"
 
