@@ -584,7 +584,7 @@ class User(Resource):
                     return {'error': 'Permission denied. You can only edit your own profile or need admin permissions.', 'details': details}, 403
             
             # Define allowed fields for self-editing
-            self_edit_allowed_fields = {'name', 'surname', 'email', 'title', 'bio', 'preferences'}
+            self_edit_allowed_fields = {'name', 'surname', 'email', 'title', 'bio', 'preferences', 'accepted_terms', 'accepted_governance'}
             
             # Filter update data based on permissions
             if is_self_edit:
