@@ -191,6 +191,60 @@ services:
       retries: 10
       start_period: 60s
 
+  # Folio Database
+  folio-db:
+    image: postgres:14
+    container_name: folio-db
+    environment:
+      POSTGRES_DB: folio
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: folio-db-pass-123
+    ports:
+      - "5435:5432"
+    volumes:
+      - folio-db-data:/var/lib/postgresql/data
+      - ${AGARI_HELM_PATH}/helm/folio-db/sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d folio"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Folio
+  folio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: folio
+    environment:
+      KEYCLOAK_HOST: "http://keycloak:8080"
+      KEYCLOAK_REALM: "agari"
+      KEYCLOAK_ISSUER: "http://keycloak:8080/realms/agari"
+      KEYCLOAK_CLIENT_ID: "dms"
+      KEYCLOAK_CLIENT_SECRET: "VDyLEjGR3xDQvoQlrHq5AB6OwbW0Refc"
+      DB_HOST: "folio-db"
+      DB_PORT: "5432"
+      DB_NAME: "folio"
+      DB_USER: "admin"
+      DB_PASSWORD: "folio-db-pass-123"
+      SCORE_URL: "http://score:8087"
+      SONG_URL: "http://song:8080"
+    ports:
+      - "8000:8000"
+    depends_on:
+      folio-db:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      song:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/info//health/db || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
   # Maestro
   maestro:
     image: ghcr.io/overture-stack/maestro:4.3.0
@@ -241,6 +295,7 @@ services:
 volumes:
   keycloak-db-data:
   song-db-data:
+  folio-db-data:
   elasticsearch-data:
   zookeeper-data:
   zookeeper-logs:

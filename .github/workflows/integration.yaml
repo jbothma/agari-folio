@@ -17,8 +17,8 @@ jobs:
       - name: Checkout agari-helm
         uses: actions/checkout@v4
         with:
-          repository: OpenUpSA/agari-helm
-          ref: master
+          repository: jbothma/agari-helm
+          ref: integration-tested
           path: agari-helm
 
       - name: Set up Docker Buildx
@@ -80,6 +80,23 @@ jobs:
 
           echo "Successfully obtained access token"
           echo "ACCESS_TOKEN=${ACCESS_TOKEN}" >> $GITHUB_ENV
+
+      - name: Test Folio whoami endpoint
+        run: |
+          echo "Testing Folio /info/whoami endpoint..."
+          RESPONSE=$(curl --silent --request GET \
+            --url http://localhost:8000/info/whoami \
+            --header "authorization: Bearer ${ACCESS_TOKEN}")
+
+          echo "Response: $RESPONSE"
+
+          if echo "$RESPONSE" | grep -q "owner@org1.ac.za"; then
+            echo "✓ Successfully verified user identity: owner@org1.ac.za"
+            exit 0
+          else
+            echo "✗ Failed to find owner@org1.ac.za in response"
+            exit 1
+          fi
 
       - name: Print docker compose logs
         if: always()
