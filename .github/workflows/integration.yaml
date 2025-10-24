@@ -49,6 +49,29 @@ jobs:
         if: success()
         run: docker compose ps
 
+      - name: Test authentication
+        run: |
+          echo "Testing Keycloak authentication..."
+          RESPONSE=$(curl --silent --request POST \
+            --url http://localhost:8080/realms/agari/protocol/openid-connect/token \
+            --header 'content-type: application/x-www-form-urlencoded' \
+            --data username=owner@org1.ac.za \
+            --data password=pass123 \
+            --data grant_type=password \
+            --data client_id=dms \
+            --data client_secret=VDyLEjGR3xDQvoQlrHq5AB6OwbW0Refc)
+
+          ACCESS_TOKEN=$(echo "$RESPONSE" | jq -r '.access_token')
+
+          if [ "$ACCESS_TOKEN" = "null" ] || [ -z "$ACCESS_TOKEN" ]; then
+            echo "Failed to get access token"
+            echo "Response: $RESPONSE"
+            exit 1
+          fi
+
+          echo "Successfully obtained access token"
+          echo "ACCESS_TOKEN=${ACCESS_TOKEN}" >> $GITHUB_ENV
+
       - name: Print docker compose logs
         if: always()
         run: docker compose logs
