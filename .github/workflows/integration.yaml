@@ -14,10 +14,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Checkout agari-helm
+        uses: actions/checkout@v4
+        with:
+          repository: OpenUpSA/agari-helm
+          ref: master
+          path: agari-helm
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Start services
+        env:
+          AGARI_HELM_PATH: ${{ github.workspace }}/agari-helm
         run: docker compose up -d
 
       - name: Wait for services to be healthy
