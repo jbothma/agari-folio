@@ -98,6 +98,27 @@ jobs:
             exit 1
           fi
 
+      - name: Create pathogen
+        run: |
+          echo "Creating pathogen..."
+          RESPONSE=$(curl --silent --request POST \
+            --url http://localhost:8000/pathogens \
+            --header "authorization: Bearer ${SYSADMIN_ACCESS_TOKEN}" \
+            --header 'content-type: application/json' \
+            --data '{"name": "Cholera","description": "Cholera Virus","scientific_name": "Vibrio cholerae"}')
+
+          echo "Response: $RESPONSE"
+
+          PATHOGEN_ID=$(echo "$RESPONSE" | jq -r '.id')
+
+          if [ "$PATHOGEN_ID" = "null" ] || [ -z "$PATHOGEN_ID" ]; then
+            echo "✗ Failed to create pathogen or get pathogen ID"
+            exit 1
+          fi
+
+          echo "✓ Successfully created pathogen with ID: $PATHOGEN_ID"
+          echo "PATHOGEN_ID=${PATHOGEN_ID}" >> $GITHUB_ENV
+
       - name: Print docker compose logs
         if: always()
         run: docker compose logs
