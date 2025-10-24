@@ -8,7 +8,7 @@ import json
 from datetime import datetime, date
 from decimal import Decimal
 import requests
-from helpers import magic_link, invite_user_to_project
+from helpers import magic_link, invite_user_to_project, access_revoked_notification
 
 
 # Custom JSON encoder to handle datetime and other types
@@ -510,6 +510,7 @@ class User(Resource):
 
         try:
             keycloak_auth.delete_user(user_id)
+            access_revoked_notification(user_id)
             return {'message': 'User deleted successfully'}, 204
         except Exception as e:
             return {'error': f'Failed to delete user: {str(e)}'}, 500
