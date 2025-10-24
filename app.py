@@ -463,7 +463,7 @@ class UserList(Resource):
         if not redirect_uri:
             return {'error': 'Redirect is required'}, 400
 
-        keycloak_response = magic_link(email, expiration_seconds, send_email)
+        keycloak_response = magic_link(email, redirect_uri, expiration_seconds, send_email)
         return keycloak_response
 
 
