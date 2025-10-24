@@ -30,7 +30,7 @@ jobs:
         run: docker compose up -d
 
       - name: Wait for services to be healthy
-        timeout-minutes: 2
+        timeout-minutes: 5
         run: |
           echo "Waiting for all services to become healthy (excluding zookeeper)..."
           END=$((SECONDS+120))
@@ -60,41 +60,41 @@ jobs:
 
       - name: Test authentication
         run: |
-          echo "Testing Keycloak authentication..."
+          echo "Testing Keycloak authentication as system-admin..."
           RESPONSE=$(curl --silent --request POST \
             --url http://localhost:8080/realms/agari/protocol/openid-connect/token \
             --header 'content-type: application/x-www-form-urlencoded' \
-            --data username=owner@org1.ac.za \
+            --data username=system.admin@agari.tech \
             --data password=pass123 \
             --data grant_type=password \
             --data client_id=dms \
             --data client_secret=VDyLEjGR3xDQvoQlrHq5AB6OwbW0Refc)
 
-          ACCESS_TOKEN=$(echo "$RESPONSE" | jq -r '.access_token')
+          SYSADMIN_ACCESS_TOKEN=$(echo "$RESPONSE" | jq -r '.access_token')
 
-          if [ "$ACCESS_TOKEN" = "null" ] || [ -z "$ACCESS_TOKEN" ]; then
+          if [ "$SYSADMIN_ACCESS_TOKEN" = "null" ] || [ -z "$SYSADMIN_ACCESS_TOKEN" ]; then
             echo "Failed to get access token"
             echo "Response: $RESPONSE"
             exit 1
           fi
 
-          echo "Successfully obtained access token"
-          echo "ACCESS_TOKEN=${ACCESS_TOKEN}" >> $GITHUB_ENV
+          echo "Successfully obtained access token for system-admin"
+          echo "SYSADMIN_ACCESS_TOKEN=${SYSADMIN_ACCESS_TOKEN}" >> $GITHUB_ENV
 
       - name: Test Folio whoami endpoint
         run: |
           echo "Testing Folio /info/whoami endpoint..."
           RESPONSE=$(curl --silent --request GET \
             --url http://localhost:8000/info/whoami \
-            --header "authorization: Bearer ${ACCESS_TOKEN}")
+            --header "authorization: Bearer ${SYSADMIN_ACCESS_TOKEN}")
 
           echo "Response: $RESPONSE"
 
-          if echo "$RESPONSE" | grep -q "owner@org1.ac.za"; then
-            echo "✓ Successfully verified user identity: owner@org1.ac.za"
+          if echo "$RESPONSE" | grep -q "system.admin@agari.tech"; then
+            echo "✓ Successfully verified user identity: system.admin@agari.tech"
             exit 0
           else
-            echo "✗ Failed to find owner@org1.ac.za in response"
+            echo "✗ Failed to find system.admin@agari.tech in response"
             exit 1
           fi
 
