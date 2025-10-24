@@ -1,0 +1,242 @@
+services:
+  # Keycloak Database
+  keycloak-db:
+    image: postgres:14
+    container_name: keycloak-db
+    environment:
+      POSTGRES_DB: keycloak_db
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: keycloak-db-pass-123
+    ports:
+      - "5433:5432"
+    volumes:
+      - keycloak-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d keycloak_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Keycloak
+  keycloak:
+    image: quay.io/phasetwo/phasetwo-keycloak:26.2.5
+    container_name: keycloak
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak_db
+      KC_DB_USERNAME: admin
+      KC_DB_PASSWORD: keycloak-db-pass-123
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin123
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_PROXY: edge
+      KC_FEATURES: preview
+      KC_CORS_ORIGINS: "*"
+      JAVA_OPTS_APPEND: "-Djava.awt.headless=true -Djboss.modules.system.pkgs=org.jboss.byteman -Djava.net.preferIPv4Stack=true -server -Xms512m -Xmx768m"
+    command: start-dev
+    ports:
+      - "8080:8080"
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080;echo -e 'GET /health/ready HTTP/1.1\r\nhost: 127.0.0.1:8080\r\nConnection: close\r\n\r\n' >&3;if [ $? -eq 0 ]; then exit 0;else exit 1;fi;exec 3<&-;exec 3>&-"]
+      interval: 30s
+      timeout: 15s
+      retries: 12
+      start_period: 120s
+
+  # Song Database
+  song-db:
+    image: postgres:14
+    container_name: song-db
+    environment:
+      POSTGRES_DB: song_db
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: song-db-pass-123
+    ports:
+      - "5434:5432"
+    volumes:
+      - song-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d song_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Elasticsearch
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.15
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - cluster.name=workflow.elasticsearch
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms300m -Xmx300m"
+      - network.host=0.0.0.0
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 60s
+
+  # Zookeeper (required for Kafka)
+  zookeeper:
+    image: quay.io/strimzi/kafka:0.43.0-kafka-3.8.0
+    container_name: zookeeper
+    command: [
+      "sh", "-c",
+      "bin/zookeeper-server-start.sh config/zookeeper.properties"
+    ]
+    ports:
+      - "2181:2181"
+    environment:
+      LOG_DIR: /tmp/logs
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-logs:/var/lib/zookeeper/log
+
+  # Kafka
+  kafka:
+    image: quay.io/strimzi/kafka:0.43.0-kafka-3.8.0
+    container_name: kafka
+    command: [
+      "sh", "-c",
+      "bin/kafka-server-start.sh config/server.properties --override listeners=$${KAFKA_LISTENERS} --override advertised.listeners=$${KAFKA_ADVERTISED_LISTENERS} --override zookeeper.connect=$${KAFKA_ZOOKEEPER_CONNECT} --override listener.security.protocol.map=$${KAFKA_LISTENER_SECURITY_PROTOCOL_MAP} --override inter.broker.listener.name=$${KAFKA_INTER_BROKER_LISTENER_NAME} --override offsets.topic.replication.factor=$${KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR} --override transaction.state.log.replication.factor=$${KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR} --override transaction.state.log.min.isr=$${KAFKA_TRANSACTION_STATE_LOG_MIN_ISR} --override default.replication.factor=$${KAFKA_DEFAULT_REPLICATION_FACTOR} --override min.insync.replicas=$${KAFKA_MIN_INSYNC_REPLICAS}"
+    ]
+    ports:
+      - "9092:9092"
+    environment:
+      LOG_DIR: /tmp/logs
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_MIN_INSYNC_REPLICAS: 1
+    depends_on:
+      - zookeeper
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # Song
+  song:
+    image: ghcr.io/overture-stack/song-server:edge
+    container_name: song
+    environment:
+      SPRING_PROFILES_ACTIVE: "prod,secure,kafka,s3,score-client-cred"
+      SPRING_FLYWAY_ENABLED: "true"
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://song-db:5432/song_db?stringtype=unspecified"
+      SPRING_DATASOURCE_USERNAME: "admin"
+      SPRING_DATASOURCE_PASSWORD: "song-db-pass-123"
+      AUTH_SERVER_PROVIDER: "keycloak"
+      AUTH_SERVER_KEYCLOAK_HOST: "http://keycloak:8080"
+      AUTH_SERVER_KEYCLOAK_REALM: "agari"
+      AUTH_SERVER_CLIENTID: "dms"
+      AUTH_SERVER_CLIENTSECRET: "dms-secret"
+      AUTH_SERVER_TOKENNAME: "apiKey"
+      AUTH_SERVER_SCOPE_STUDY_PREFIX: "STUDY."
+      AUTH_SERVER_SCOPE_STUDY_SUFFIX: ".WRITE"
+      AUTH_SERVER_SCOPE_SYSTEM: "song.WRITE"
+      SCORE_URL: "http://score:8087"
+      SCORE_CLIENTCREDENTIALS_ID: "dms"
+      SCORE_CLIENTCREDENTIALS_SECRET: "dms-secret"
+      SCORE_CLIENTCREDENTIALS_TOKENURL: "http://keycloak:8080/realms/agari/protocol/openid-connect/token"
+      SCORE_CLIENTCREDENTIALS_SYSTEMSCOPE: "openid"
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK-SET-URI: "http://keycloak:8080/realms/agari/protocol/openid-connect/certs"
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER-URI: "http://keycloak:8080/realms/agari"
+      KAFKA_BOOTSTRAPSERVERS: "kafka:9092"
+      KAFKA_TEMPLATE_DEFAULTTOPIC: "song-analysis"
+      ID_USELOCAL: "true"
+      SCHEMAS_ENFORCELATEST: "true"
+      CLIENT_STUDY_MAXUPLOADFILESIZE: "10737418240"
+      CLIENT_STUDY_MAXNUMBEROFFILESPERUPLOAD: "20"
+      SWAGGER_ALTERNATEURL: "/swagger-api"
+    ports:
+      - "8081:8080"
+    depends_on:
+      song-db:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/isAlive || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  # Maestro
+  maestro:
+    image: ghcr.io/overture-stack/maestro:4.3.0
+    container_name: maestro
+    environment:
+      MAESTRO_FAILURELOG_ENABLED: "true"
+      MAESTRO_FAILURELOG_DIR: "app/logs/maestro"
+      MAESTRO_LOGGING_LEVEL_ROOT: "INFO"
+      MAESTRO_NOTIFICATIONS_SLACK_ENABLED: "false"
+      MAESTRO_REPOSITORIES_0_CODE: "song.overture"
+      MAESTRO_REPOSITORIES_0_URL: "http://song:8080"
+      MAESTRO_REPOSITORIES_0_NAME: "Overture"
+      MAESTRO_REPOSITORIES_0_ORGANIZATION: "Overture"
+      MAESTRO_REPOSITORIES_0_COUNTRY: "CA"
+      MAESTRO_REPOSITORIES_0_AUTH_TYPE: "oauth2"
+      MAESTRO_REPOSITORIES_0_AUTH_CLIENTID: "dms"
+      MAESTRO_REPOSITORIES_0_AUTH_CLIENTSECRET: "dms-secret"
+      MAESTRO_REPOSITORIES_0_AUTH_TOKENURL: "http://keycloak:8080/realms/agari/protocol/openid-connect/token"
+      MAESTRO_REPOSITORIES_0_AUTH_SCOPE: "song.READ"
+      MAESTRO_ELASTICSEARCH_CLUSTER_NODES: "http://elasticsearch:9200"
+      MAESTRO_ELASTICSEARCH_CLIENT_BASICAUTH_ENABLED: "false"
+      MAESTRO_ELASTICSEARCH_CLIENT_TRUSTSELFSIGNCERT: "true"
+      MAESTRO_ELASTICSEARCH_INDEXES_ANALYSISCENTRIC_ENABLED: "false"
+      MAESTRO_ELASTICSEARCH_INDEXES_FILECENTRIC_ENABLED: "true"
+      MAESTRO_ELASTICSEARCH_INDEXES_FILECENTRIC_NAME: "agari-index"
+      MAESTRO_ELASTICSEARCH_INDEXES_FILECENTRIC_ALIAS: "file_centric"
+      SPRING_MVC_ASYNC_REQUESTTIMEOUT: "-1"
+      SPRING_CLOUD_STREAM_KAFKA_BINDER_BROKERS: "kafka:9092"
+      SPRING_CLOUD_STREAM_BINDINGS_SONGINPUT_DESTINATION: "song-analysis"
+      SPRINGDOC_SWAGGERUI_PATH: "/swagger-api"
+      MANAGEMENT_HEALTH_ELASTICSEARCH_ENABLED: "false"
+    ports:
+      - "11235:11235"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      song:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "jrunscript", "-e", "var url = new java.net.URL('http://localhost:11235/'); url.openConnection().getResponseCode() == 200 ? java.lang.System.exit(0) : java.lang.System.exit(1);"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+
+volumes:
+  keycloak-db-data:
+  song-db-data:
+  elasticsearch-data:
+  zookeeper-data:
+  zookeeper-logs:
+  kafka-data:
