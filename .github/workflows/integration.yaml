@@ -1,0 +1,58 @@
+name: Integration Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Start services
+        run: docker compose up -d
+
+      - name: Wait for services to be healthy
+        timeout-minutes: 2
+        run: |
+          echo "Waiting for all services to become healthy (excluding zookeeper)..."
+          END=$((SECONDS+120))
+
+          while [ $SECONDS -lt $END ]; do
+            # Get list of unhealthy services (excluding NAME header, already healthy services, and zookeeper)
+            UNHEALTHY=$(docker compose ps --status running | egrep -v '(NAME|healthy|zookeeper)' || true)
+
+            if [ -z "$UNHEALTHY" ]; then
+              echo "All services are healthy!"
+              docker compose ps
+              exit 0
+            fi
+
+            echo "Still waiting for services to become healthy..."
+            echo "$UNHEALTHY"
+            sleep 5
+          done
+
+          echo "Timeout: Services did not become healthy within 2 minutes"
+          docker compose ps
+          exit 1
+
+      - name: Show service status
+        if: success()
+        run: docker compose ps
+
+      - name: Print docker compose logs
+        if: always()
+        run: docker compose logs
+
+      - name: Clean up
+        if: always()
+        run: docker compose down -v
