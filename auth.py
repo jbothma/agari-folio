@@ -672,6 +672,27 @@ class KeycloakAuth:
             return {'success': False, 'error': f"Error fetching user {user_id}: {e}"}
         
 
+    def delete_user(self, user_id):
+        admin_token = self.get_admin_token()
+        if not admin_token:
+            return {'success': False, 'error': 'Could not get admin token'}
+
+        user_url = f"{self.keycloak_url}/admin/realms/{self.realm}/users/{user_id}"
+
+        headers = {
+            'Authorization': f'Bearer {admin_token}',
+            'Content-Type': 'application/json'
+        }
+
+        # Get current user data
+        response = requests.get(user_url, headers=headers)
+        response.raise_for_status()
+        user = response.json()
+
+        user['enabled'] = False
+        requests.put(user_url, headers=headers, json=user)
+
+
 def require_auth(keycloak_auth):
 
     """Decorator to require authentication"""
