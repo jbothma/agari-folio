@@ -1,7 +1,7 @@
 @folio = http://localhost:5000
 # @folio = https://folio-staging.openup.org.za
 @keycloak = http://keycloak.local
-
+# @keycloak = https://keycloak-staging.openup.org.za
 
 
 @realm = agari
@@ -135,7 +135,15 @@ Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-  "bio": "5"
+  "name": "name",
+  "surname" : "surname",
+  "email": "testuser1@example.com",
+  "bio": "lorem",
+  "preferences": {
+    "theme": "dark"
+  },
+  "accepted_terms": true,
+  "accepted_governance": true
 }
 
 ##########################
@@ -150,21 +158,20 @@ Authorization: Bearer {{token}}
 ###
 
 # @name create_organisation
-POST {{folio}}/organisations
+POST {{folio}}/organisations/
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-    "name": "Organisation 1",
-    "abbreviation": "org1",
-    "about": "Organisation 1",
-    "url": "https://org1.example.com"
+    "name": "The National Institute For Communicable Diseases",
+    "abbreviation": "NICD",
+    "about": "About NICD",
+    "url": "https://www.nicd.ac.za"
 }
 
 ###
 
 @organisation_id = 783b767c-c41e-4a6a-9132-ea52fadb8e17
-# @organisation_id = 6fb55e17-8b29-4668-8b31-f9dbdd4bc6c7
 
 # @name get_organisation
 GET {{folio}}/organisations/{{organisation_id}}
@@ -186,6 +193,18 @@ Content-Type: application/json
 # @name delete_organisation
 DELETE {{folio}}/organisations/{{organisation_id}}
 Authorization: Bearer {{token}}
+
+###
+
+# @name add_organisation_member
+POST {{folio}}/organisations/{{organisation_id}}/members
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "user_id": "3948dda5-f903-44eb-8d16-759fed3492a1",
+    "role": "org-owner"
+}
 
 ###
 
@@ -215,9 +234,9 @@ Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-    "name": "Cholera4",
-    "description": "Cholera Virus4",
-    "scientific_name": "Vibrio cholerae4"
+    "name": "Cholera",
+    "description": "Cholera Virus",
+    "scientific_name": "Vibrio cholerae"
 }
 
 ###
@@ -263,7 +282,8 @@ Authorization: Bearer {{token}}
 ##########################
 
 # @name list_projects
-GET {{folio}}/projects?search=cholera
+GET {{folio}}/projects
+
 Authorization: Bearer {{token}}
 
 ###
@@ -282,7 +302,7 @@ Content-Type: application/json
 
 ###
 
-@project_id = f06ed779-e92b-4cc8-b671-d1188429bf8a
+@project_id = 6fb55e17-8b29-4668-8b31-f9dbdd4bc6c7
 
 ### @name get_project
 GET {{folio}}/projects/{{project_id}}

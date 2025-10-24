@@ -8,13 +8,11 @@ PERMISSIONS = {
     "view_users": ["system-admin", "agari-org-owner", "agari-org-admin"],
 
     # Organization management
-    # TODO: Not implemented yet
     "create_org": ["system-admin"],
     "delete_org": ["system-admin"],
     "manage_org_settings": ["system-admin", "agari-org-owner", "agari-org-admin"],
 
     # Organization members management
-    "invite_org_members": ["system-admin", "agari-org-owner", "agari-org-admin"],
     "add_org_members": ["system-admin", "agari-org-owner", "agari-org-admin"],
     "remove_org_members": ["system-admin", "agari-org-owner", "agari-org-admin"],
     "change_org_member_roles": ["system-admin", "agari-org-owner", "agari-org-admin"],

@@ -553,7 +553,7 @@ class User(Resource):
                     return {'error': 'Permission denied. You can only edit your own profile or need admin permissions.', 'details': details}, 403
             
             # Define allowed fields for self-editing
-            self_edit_allowed_fields = {'name', 'surname', 'email', 'title', 'bio'}
+            self_edit_allowed_fields = {'name', 'surname', 'email', 'title', 'bio', 'preferences'}
             
             # Filter update data based on permissions
             if is_self_edit:
@@ -642,16 +642,17 @@ class OrganisationList(Resource):
             abbreviation = data.get('abbreviation')
             url = data.get('url')
             about = data.get('about')
+            sharing_policy = data.get('sharing_policy', 'private')
             
             if not name:
                 return {'error': 'Organisation name is required'}, 400
             
             with get_db_cursor() as cursor:
                 cursor.execute("""
-                    INSERT INTO organisations (name, abbreviation, url, about)
-                    VALUES (%s, %s, %s, %s)
+                    INSERT INTO organisations (name, abbreviation, url, about, sharing_policy)
+                    VALUES (%s, %s, %s, %s, %s)
                     RETURNING *
-                """, (name, abbreviation, url, about))
+                """, (name, abbreviation, url, about, sharing_policy))
                 
                 new_org = cursor.fetchone()
                 
@@ -807,9 +808,9 @@ class Organisation(Resource):
 @organisation_ns.route('/<string:org_id>/members')
 class OrganisationUsers(Resource):
 
-    ### GET /organisations/<org_id>/users ###
+    ### GET /organisations/<org_id>/members ###
 
-    @organisation_ns.doc('list_organisation_users')
+    @organisation_ns.doc('list_organisation_members')
     @require_auth(keycloak_auth)
     @require_permission('view_org_members')
     def get(self, org_id):
@@ -821,6 +822,85 @@ class OrganisationUsers(Resource):
             return users
         except Exception as e:
             return {'error': f'Failed to retrieve users: {str(e)}'}, 500
+        
+    
+    ### POST /organisations/<org_id>/members ###
+    
+    @organisation_ns.doc('add_organisation_member')
+    @require_auth(keycloak_auth)
+    @require_permission('add_org_members')
+    def post(self, org_id):
+
+        """Add a user to an organisation with role"""
+
+        try:
+            # Extract current user info to check organization access
+            user_info = extract_user_info(request.user)
+            user_org_id = user_info.get('organisation_id')
+            
+            # Check if user is system-admin (can add to any org)
+            if 'system-admin' not in user_info.get('roles', []):
+                # For non-system-admin users, check organization match
+                if not user_org_id:
+                    return {'error': 'Permission denied. User not assigned to any organisation.'}, 403
+                
+                # Handle case where user_org_id might be a list or string
+                user_orgs = user_org_id if isinstance(user_org_id, list) else [user_org_id]
+                
+                if org_id not in user_orgs:
+                    return {'error': 'Permission denied. You can only add members to your own organisation.'}, 403
+
+            data = request.get_json()
+            if not data:
+                return {'error': 'No JSON data provided'}, 400
+            
+            user_id = data.get('user_id')
+            role = data.get('role') 
+            
+            if not user_id:
+                return {'error': 'User ID is required'}, 400
+            if role not in {'org-viewer', 'org-admin', 'org-owner'}:
+                return {'error': 'Invalid role specified'}, 400
+
+            # Check if user exists in Keycloak
+            user = keycloak_auth.get_user(user_id)
+            if not user:
+                return {'error': 'User not found in Keycloak'}, 404
+
+            # Prepare update data with proper structure
+            update_data = {
+                'attributes': {
+                    'organisation_id': [org_id]  
+                },
+                'realm_roles': [f'agari-{role}']  
+            }
+            
+            result = keycloak_auth.update_user(user_id, update_data)
+            
+            if result.get('success'):
+                return {
+                    'message': f'User added to organisation with role "{role}"',
+                    'user_id': user_id,
+                    'organisation_id': org_id,
+                    'role': role,
+                    'realm_role_assigned': f'agari-{role}',
+                    'update_details': result.get('updates', {})
+                }
+            else:
+                return {
+                    'error': 'Failed to add user to organisation',
+                    'details': result.get('error'),
+                    'errors': result.get('errors', {})
+                }, 500
+                
+        except Exception as e:
+            return {'error': f'Failed to add user to organisation: {str(e)}'}, 500
+
+
+
+
+    
+
 
 
 ##########################
@@ -848,7 +928,7 @@ class ProjectList(Resource):
         """
 
         organisation_id = keycloak_auth.get_user_org()
-        
+
         # Get query parameters
         filter_org_id = request.args.get('organisation_id')
         filter_pathogen_id = request.args.get('pathogen_id')
@@ -917,7 +997,7 @@ class ProjectList(Resource):
                         org.abbreviation as organisation_abbreviation
                     FROM projects p
                     LEFT JOIN pathogens pat ON p.pathogen_id::uuid = pat.id::uuid
-                    LEFT JOIN organisations org ON p.organisation_id::uuid = org.id::uuid
+                    LEFT JOIN organisations org ON p.organisation_id::text = org.id::text
                     WHERE {where_clause}
                     ORDER BY p.name
                     LIMIT %s OFFSET %s
