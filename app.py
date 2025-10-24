@@ -1375,15 +1375,19 @@ class ProjectUsers(Resource):
             
             user_id = data.get('user_id')
             role = data.get('role')
+            redirect_uri = data.get('redirect_uri')
 
             if not user_id or role not in ['project-admin', 'project-contributor', 'project-viewer']:
                 return {'error': 'user_id and valid role (project-admin, project-contributor, project-viewer) are required'}, 400
+
+            if not redirect_uri:
+                return {'error': 'redirect_uri is required for acceptance link'}, 400
 
             # Check if user exists in Keycloak
             user = keycloak_auth.get_user(user_id)
             if not user:
                 return {'error': 'User not found in Keycloak'}, 404
-            response = invite_user_to_project(user, project_id, role)
+            response = invite_user_to_project(user, redirect_uri, project_id, role)
             return response
         except Exception as e:
             return {'error': f'Failed to add user to project: {str(e)}'}, 500

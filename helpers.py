@@ -15,7 +15,6 @@ sg_api_key = os.getenv(
 )
 sg_from_email = os.getenv("SENDGRID_FROM_EMAIL", "webapps+agaridev@openup.org.za")
 sg_from_name = os.getenv("SENDGRID_FROM_NAME", "AGARI")
-frontend_url = os.getenv("FRONTEND_URL", "https://agari-staging.openup.org.za")
 
 sg = SendGridAPIClient(sg_api_key)
 
@@ -102,7 +101,7 @@ def quiet_create_user(email, redirect_uri):
     return keycloak_response
 
 
-def invite_user_to_project(user, project_id, role):
+def invite_user_to_project(user, redirect_uri, project_id, role):
     if user.get("attributes"):
         name = user["attributes"].get("name", [""])[0]
         surname = user["attributes"].get("surname", [""])[0]
@@ -114,7 +113,7 @@ def invite_user_to_project(user, project_id, role):
     subject = "You've been invited to AGARI"
 
     inv_token = hashlib.md5(user["id"].encode()).hexdigest()
-    accept_link = f"{frontend_url}/accept-invite?userid={user['id']}&token={inv_token}"
+    accept_link = f"{redirect_uri}/accept-invite?userid={user['id']}&token={inv_token}"
 
     html_template = mjml_to_html("project_invite")
     html_content = render_template_string(
