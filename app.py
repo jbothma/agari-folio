@@ -8,6 +8,7 @@ import json
 from datetime import datetime, date
 from decimal import Decimal
 import requests
+from helpers import magic_link, invite_user_to_project
 
 
 # Custom JSON encoder to handle datetime and other types
@@ -454,7 +455,7 @@ class UserList(Resource):
         
         email = data.get('email')
         redirect_uri = data.get('redirect_uri')
-        expiration_seconds = data.get('expiration_seconds', 3600)
+        expiration_seconds = data.get('expiration_seconds', 600)
         send_email = data.get('send_email', True)
 
         if not email:
@@ -462,41 +463,9 @@ class UserList(Resource):
         if not redirect_uri:
             return {'error': 'Redirect is required'}, 400
 
-        admin_token = keycloak_auth.get_admin_token()
-        if not admin_token:
-            return {'error': 'Failed to authenticate with Keycloak admin'}, 500
-        headers = {
-            'Authorization': f'Bearer {admin_token}',
-            'Content-Type': 'application/json'
-        }
-        payload = {
-            'email': email,
-            'client_id': keycloak_auth.client_id,
-            'redirect_uri': redirect_uri,
-            'expiration_seconds': expiration_seconds,
-            'force_create': True,
-            'reusable': False,
-            'send_email': send_email
-        }
-        magic_link_url = f"{keycloak_auth.keycloak_url}/realms/{keycloak_auth.realm}/magic-link"
+        keycloak_response = magic_link(email, expiration_seconds, send_email)
+        return keycloak_response
 
-        keycloak_response = requests.post(
-            magic_link_url,
-            headers=headers,
-            json=payload
-        )
-
-        if keycloak_response.status_code == 200:
-            response_data = keycloak_response.json()
-            return {
-                'message': 'Magic link sent successfully',
-                'email': email,
-                'user_id': response_data.get('user_id'),
-            }, 200
-        else:
-            return {
-                'error': f'Failed to create magic link.'
-            }, 500
 
 @user_ns.route('/<string:user_id>')        
 class User(Resource):
@@ -1408,38 +1377,13 @@ class ProjectUsers(Resource):
 
             if not user_id or role not in ['project-admin', 'project-contributor', 'project-viewer']:
                 return {'error': 'user_id and valid role (project-admin, project-contributor, project-viewer) are required'}, 400
-            
+
             # Check if user exists in Keycloak
             user = keycloak_auth.get_user(user_id)
             if not user:
                 return {'error': 'User not found in Keycloak'}, 404
-
-            # Remove user from all existing project roles first (role hierarchy enforcement)
-            removed_roles = []
-            for existing_role in ['project-admin', 'project-contributor', 'project-viewer']:
-                if keycloak_auth.user_has_attribute(user_id, existing_role, project_id):
-                    success = keycloak_auth.remove_attribute_value(user_id, existing_role, project_id)
-                    if success:
-                        removed_roles.append(existing_role)
-                        print(f"Removed project_id {project_id} from role {existing_role} for user {user_id}")
-                    else:
-                        return {'error': f'Failed to remove existing role {existing_role}'}, 500
-            
-            # Add the user to the new role
-            success = keycloak_auth.add_attribute_value(user_id, role, project_id)
-            if not success:
-                return {'error': f'Failed to add user to role {role}'}, 500
-            
-            print(f"Added project_id {project_id} to role {role} for user {user_id}")
-
-            return {
-                'message': 'User added to project successfully',
-                'user_id': user_id,
-                'project_id': project_id,
-                'new_role': role,
-                'removed_roles': removed_roles
-            }, 200
-
+            response = invite_user_to_project(user, project_id, role)
+            return response
         except Exception as e:
             return {'error': f'Failed to add user to project: {str(e)}'}, 500
 
@@ -1925,6 +1869,62 @@ class StudyAnalysisUnpublish(Resource):
         except Exception as e:
             return {'error': f'Failed to unpublish analysis: {str(e)}'}, 500
 
+##########################
+### Invites
+##########################
+
+invite_ns = api.namespace('invites', description='Invite management endpoints')
+
+@invite_ns.route('/project/<string:token>/accept')
+class ProjectUserConfirm(Resource):
+    ### POST /invites/<token>/accept ###
+
+    @api.doc('accept_project_invite')
+    @require_auth(keycloak_auth)
+    def post(self, token):
+        user = keycloak_auth.get_users_by_attribute('invite_token', token)[0]
+        user_id = user["user_id"]
+
+        project_id = None
+        for role_attr in ['project-admin', 'project-contributor', 'project-viewer']:
+            role_values = user["attributes"].get(role_attr, [])
+            if role_values:
+                project_id = role_values[0]
+                break
+
+        invite_role = user["attributes"].get("invite_role", [""])[0]
+        invite_project_id = user["attributes"].get("invite_project_id", [""])[0]
+
+        # Remove user from all existing project roles first (role hierarchy enforcement)
+        removed_roles = []
+        for existing_role in ['project-admin', 'project-contributor', 'project-viewer']:
+            if keycloak_auth.user_has_attribute(user_id, existing_role, project_id):
+                success = keycloak_auth.remove_attribute_value(user_id, existing_role, project_id)
+                if success:
+                    removed_roles.append(existing_role)
+                    print(f"Removed project_id {project_id} from role {existing_role} for user {user_id}")
+                else:
+                    return {'error': f'Failed to remove existing role {existing_role}'}, 500
+
+        # Add the user to the new role
+        success = keycloak_auth.add_attribute_value(user_id, invite_role, invite_project_id)
+        if not success:
+            return {'error': f'Failed to add user to role {invite_role}'}, 500
+
+        print(f"Added project_id {project_id} to role {invite_role} for user {user_id}")
+
+        # Remove temp attributes
+        keycloak_auth.remove_attribute_value(user_id, 'invite_token', token)
+        keycloak_auth.remove_attribute_value(user_id, 'invite_project_id', invite_project_id)
+        keycloak_auth.remove_attribute_value(user_id, 'invite_role', invite_role)
+
+        return {
+            'message': 'User added to project successfully',
+            'user_id': user_id,
+            'project_id': invite_project_id,
+            'new_role': invite_role,
+            'removed_roles': removed_roles
+        }, 200
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 8000))
