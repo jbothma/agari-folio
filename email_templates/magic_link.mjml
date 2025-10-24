@@ -55,9 +55,7 @@
 
       <!-- Header -->
       <mj-column>
-        <mj-text align="left" font-size="20px" font-weight="700" color="#204727">
-          AGARI LOGO
-        </mj-text>
+        <mj-image src="https://i.imgur.com/cfpVdur.png" alt="AGARI Logo" width="120px" align="left" />
       </mj-column>
     </mj-section>
 
@@ -83,7 +81,7 @@
     <mj-section padding="0 0 16px 0">
       <mj-column>
         <mj-text align="center">
-          <a href="https://agari.example/accept-invite?token={{TOKEN}}" class="agari-btn">
+          <a href="{{ magic_link }}" class="agari-btn">
             Sign in
           </a>
         </mj-text>

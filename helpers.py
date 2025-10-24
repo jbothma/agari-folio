@@ -72,11 +72,14 @@ def magic_link(email, expiration_seconds=600, send_email=True):
         f"{keycloak_auth.keycloak_url}/realms/{keycloak_auth.realm}/magic-link"
     )
     keycloak_response = requests.post(magic_link_url, headers=headers, json=payload)
+    response_data = json.loads(keycloak_response.content.decode("utf-8"))
 
     if send_email:
         # Manually send magic link
         html_template = mjml_to_html("magic_link")
-        html_content = render_template_string(html_template, magic_link=magic_link_url)
+        html_content = render_template_string(
+            html_template, magic_link=response_data["link"]
+        )
         sendgrid_email(email, "", "Your AGARI sign-in link", html_content)
         message = "Magic link sent successfully"
     else:
