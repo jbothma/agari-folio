@@ -87,14 +87,6 @@
         </mj-text>
       </mj-column>
     </mj-section>
-<!-- Message -->
-    <mj-section padding="0 0 16px 0">
-      <mj-column>
-        <mj-text>
-          Alternatively, enter this code: 000000
-        </mj-text>
-      </mj-column>
-    </mj-section>
     <!-- Disclaimer -->
     <mj-section padding="0px 0px 24px 0px">
       <mj-column>

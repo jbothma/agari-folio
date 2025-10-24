@@ -51,7 +51,7 @@ def mjml_to_html(template_name):
     return html_template
 
 
-def magic_link(email, expiration_seconds=600, send_email=True):
+def magic_link(email, redirect_uri, expiration_seconds=600, send_email=True):
     admin_token = keycloak_auth.get_admin_token()
     if not admin_token:
         return {"error": "Failed to authenticate with Keycloak admin"}, 500
@@ -62,7 +62,7 @@ def magic_link(email, expiration_seconds=600, send_email=True):
     payload = {
         "email": email,
         "client_id": keycloak_auth.client_id,
-        "redirect_uri": frontend_url,
+        "redirect_uri": redirect_uri,
         "expiration_seconds": expiration_seconds,
         "force_create": True,
         "reusable": False,
@@ -96,8 +96,8 @@ def magic_link(email, expiration_seconds=600, send_email=True):
         return {"error": f"Failed to create magic link."}, 500
 
 
-def quiet_create_user(email):
-    keycloak_response = magic_link(email, 0, False)
+def quiet_create_user(email, redirect_uri):
+    keycloak_response = magic_link(email, redirect_uri, 0, False)
 
     return keycloak_response
 
