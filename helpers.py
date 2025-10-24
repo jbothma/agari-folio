@@ -111,7 +111,7 @@ def invite_user_to_project(user, project_id, role):
     subject = "You've been invited to AGARI"
 
     inv_token = hashlib.md5(user["id"].encode()).hexdigest()
-    accept_link = f"{frontend_url}/accept-invite?userid={user["id"]}&token={inv_token}"
+    accept_link = f"{frontend_url}/accept-invite?userid={user['id']}&token={inv_token}"
 
     html_template = mjml_to_html("project_invite")
     html_content = render_template_string(
