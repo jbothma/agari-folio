@@ -15,7 +15,7 @@ jobs:
       postgres:
         image: postgres:15
         env:
-          POSTGRES_DB: folio
+          POSTGRES_DB: folio_test
           POSTGRES_USER: admin
           POSTGRES_PASSWORD: folio-db-pass-123
         ports:
