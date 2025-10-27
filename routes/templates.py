@@ -5,7 +5,7 @@ Templates help users prepare TSV data for genomic analysis.
 
 from flask import request, send_file, Response
 from flask_restx import Namespace, Resource
-from auth import require_auth, extract_user_info, require_permission
+from auth import require_auth, extract_user_info, require_permission, keycloak_auth
 from database import get_db_cursor
 from minio import Minio
 from minio.error import S3Error
@@ -45,10 +45,6 @@ class TemplateList(Resource):
     @template_ns.doc("list_templates")
     def get(self):
         """List all templates (public access)
-
-        Query parameters:
-        - pathogen_id: Filter by pathogen ID
-        - schema_version: Filter by schema version
         """
         try:
 
@@ -76,8 +72,8 @@ class TemplateList(Resource):
         except Exception as e:
             return {"error": f"Failed to list templates: {str(e)}"}, 500
 
-    # @require_auth
-    # @require_permission('create_template', resource_type='template')
+    @require_auth(keycloak_auth)
+    @require_permission('create_template', resource_type='template')
     @template_ns.doc("create_template")
     def put(self):
         """Create or update a template (requires authentication)

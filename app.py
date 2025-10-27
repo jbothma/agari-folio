@@ -1,9 +1,9 @@
 from flask import Flask,request
 from flask_restx import Api, Resource
-from auth import KeycloakAuth, require_auth, extract_user_info, require_permission, user_has_permission
+from auth import keycloak_auth, require_auth, extract_user_info, require_permission, user_has_permission
 from permissions import PERMISSIONS
 from database import get_db_cursor, test_connection
-from templates import template_ns
+from routes.templates import template_ns
 import os
 import json
 from datetime import datetime, date
@@ -27,13 +27,6 @@ app.json_encoder = CustomJSONEncoder
 
 song = os.getenv('OVERTURE_SONG', 'http://song.local')
 score = os.getenv('OVERTURE_SCORE', 'http://score.local')
-
-keycloak_auth = KeycloakAuth(
-    keycloak_url=os.getenv('KEYCLOAK_URL', 'http://keycloak.local'),
-    realm=os.getenv('KEYCLOAK_REALM', 'agari'),
-    client_id=os.getenv('KEYCLOAK_CLIENT_ID', 'dms'),
-    client_secret=os.getenv('KEYCLOAK_CLIENT_SECRET', 'VDyLEjGR3xDQvoQlrHq5AB6OwbW0Refc')
-)
 
 app.keycloak_auth = keycloak_auth
 

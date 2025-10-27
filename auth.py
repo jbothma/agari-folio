@@ -1,3 +1,4 @@
+import os
 import jwt
 import requests
 from functools import wraps
@@ -777,3 +778,11 @@ def require_permission(permission_name, resource_type=None, resource_id_arg=None
             return f(*args, **kwargs)
         return wrapper
     return decorator
+
+
+keycloak_auth = KeycloakAuth(
+    keycloak_url=os.getenv('KEYCLOAK_URL', 'http://keycloak.local'),
+    realm=os.getenv('KEYCLOAK_REALM', 'agari'),
+    client_id=os.getenv('KEYCLOAK_CLIENT_ID', 'dms'),
+    client_secret=os.getenv('KEYCLOAK_CLIENT_SECRET', 'VDyLEjGR3xDQvoQlrHq5AB6OwbW0Refc')
+)
