@@ -1885,7 +1885,6 @@ class ProjectUserConfirm(Resource):
     ### POST /invites/<token>/accept ###
 
     @api.doc('accept_project_invite')
-    @require_auth(keycloak_auth)
     def post(self, token):
         user = keycloak_auth.get_users_by_attribute('invite_token', token)[0]
         user_id = user["user_id"]
