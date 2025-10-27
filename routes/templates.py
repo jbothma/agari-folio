@@ -205,6 +205,131 @@ class TemplateList(Resource):
             }, 500
 
 
+@template_ns.route("/<string:template_id>")
+class TemplateDetail(Resource):
+
+    @require_auth(keycloak_auth)
+    @require_permission('delete_template', resource_type='template')
+    @template_ns.doc("delete_template")
+    def delete(self, template_id):
+        """Delete a template by ID (system-admin only)
+
+        Query Parameters:
+        - hard: true/false (default: false) - If true, permanently delete from database and MinIO
+        """
+        try:
+            # Check if hard delete is requested
+            hard_delete = request.args.get('hard', 'false').lower() == 'true'
+
+            with get_db_cursor() as cursor:
+                # First get the template details
+                cursor.execute(
+                    """
+                    SELECT id, filename, minio_object_id, deleted_at
+                    FROM templates
+                    WHERE id = %s
+                    """,
+                    (template_id,)
+                )
+
+                template = cursor.fetchone()
+
+                if not template:
+                    return {'error': 'Template not found'}, 404
+
+                if hard_delete:
+                    # Hard delete - permanently remove from database and MinIO
+                    cursor.execute(
+                        """
+                        DELETE FROM templates
+                        WHERE id = %s
+                        RETURNING id, filename, minio_object_id
+                        """,
+                        (template_id,)
+                    )
+
+                    deleted_template = cursor.fetchone()
+
+                    # Delete file from MinIO
+                    try:
+                        minio_client = get_minio_client()
+                        minio_client.remove_object(TEMPLATES_BUCKET, deleted_template['minio_object_id'])
+                        logger.info(f"Deleted template file from MinIO: {deleted_template['minio_object_id']}")
+                    except S3Error as e:
+                        logger.warning(f"Failed to delete file from MinIO: {str(e)}")
+                        # Continue anyway - database record is deleted
+
+                    return {
+                        'message': f'Template "{deleted_template["filename"]}" permanently deleted',
+                        'delete_type': 'hard'
+                    }, 200
+                else:
+                    # Soft delete - set deleted_at timestamp
+                    if template['deleted_at']:
+                        return {'error': 'Template already deleted'}, 404
+
+                    cursor.execute(
+                        """
+                        UPDATE templates
+                        SET deleted_at = NOW(), updated_at = NOW()
+                        WHERE id = %s AND deleted_at IS NULL
+                        RETURNING id, filename
+                        """,
+                        (template_id,)
+                    )
+
+                    deleted_template = cursor.fetchone()
+
+                    if not deleted_template:
+                        return {'error': 'Template not found or already deleted'}, 404
+
+                    return {
+                        'message': f'Template "{deleted_template["filename"]}" deleted (soft delete)',
+                        'delete_type': 'soft'
+                    }, 200
+
+        except Exception as e:
+            logger.exception("Error deleting template")
+            return {'error': f'Failed to delete template: {str(e)}'}, 500
+
+
+@template_ns.route("/<string:template_id>/restore")
+class TemplateRestore(Resource):
+
+    @require_auth(keycloak_auth)
+    @require_permission('delete_template', resource_type='template')
+    @template_ns.doc("restore_template")
+    def post(self, template_id):
+        """Restore a soft-deleted template (system-admin only)"""
+        try:
+            with get_db_cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE templates
+                    SET deleted_at = NULL, updated_at = NOW()
+                    WHERE id = %s AND deleted_at IS NOT NULL
+                    RETURNING id, filename, pathogen_id, schema_version, minio_object_id, updated_at
+                    """,
+                    (template_id,)
+                )
+
+                restored_template = cursor.fetchone()
+
+                if not restored_template:
+                    return {'error': 'Template not found or not deleted'}, 404
+
+                return {
+                    'message': f'Template "{restored_template["filename"]}" restored successfully',
+                    'template': restored_template
+                }, 200
+
+        except Exception as e:
+            if 'duplicate key value violates unique constraint' in str(e):
+                return {'error': 'Cannot restore: A template with this pathogen and schema version already exists'}, 409
+            logger.exception("Error restoring template")
+            return {'error': f'Failed to restore template: {str(e)}'}, 500
+
+
 @template_ns.route("/<string:template_id>/download")
 class TemplateDownload(Resource):
 

@@ -522,3 +522,21 @@ Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
 
 < ./test_template.xlsx
 ------WebKitFormBoundary456--
+
+###
+
+# @name delete_template_soft
+DELETE {{folio}}/templates/{{template_id}}
+Authorization: Bearer {{token}}
+
+###
+
+# @name restore_template
+POST {{folio}}/templates/{{template_id}}/restore
+Authorization: Bearer {{token}}
+
+###
+
+# @name delete_template_hard
+DELETE {{folio}}/templates/{{template_id}}?hard=true
+Authorization: Bearer {{token}}
