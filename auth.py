@@ -692,6 +692,35 @@ class KeycloakAuth:
         user['enabled'] = False
         requests.put(user_url, headers=headers, json=user)
 
+    def get_user_access_token(self, user_id):
+        """Get an access token for a specific user using token exchange or admin token"""
+        try:
+            admin_token = self.get_client_token()
+            if not admin_token:
+                print("Failed to get admin token")
+                return None
+
+            token_url = f"{self.keycloak_url}/realms/{self.realm}/protocol/openid-connect/token"
+            exchange_data = {
+                'grant_type': 'urn:ietf:params:oauth:grant-type:token-exchange',
+                'client_id': self.client_id,
+                'client_secret': self.client_secret,
+                'subject_token': admin_token,
+                'requested_subject': user_id,
+                'audience': self.client_id,
+                'requested_token_type': 'urn:ietf:params:oauth:token-type:access_token'
+            }
+            headers = {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            }
+
+            response = requests.post(token_url, data=exchange_data, headers=headers)
+            token_data = response.json()
+            return token_data.get('access_token')
+        except Exception as e:
+            print(f"Error getting user access token: {str(e)}")
+            return None
+
 
 def require_auth(keycloak_auth):
 
@@ -945,4 +974,4 @@ def require_permission(permission_name, resource_type=None, resource_id_arg=None
                 return {'error': 'Permission denied', 'details': details}, 403
             return f(*args, **kwargs)
         return wrapper
-    return decorator
+    return decorator    

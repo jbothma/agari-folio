@@ -1923,12 +1923,18 @@ class ProjectUserConfirm(Resource):
         keycloak_auth.remove_attribute_value(user_id, 'invite_project_id', invite_project_id)
         keycloak_auth.remove_attribute_value(user_id, 'invite_role', invite_role)
 
+        # Get access token for the user
+        access_token = keycloak_auth.get_user_access_token(user_id)
+        if not access_token:
+            return {'error': f'"Failed to obtain access token for user {user_id}'}, 500
+
         return {
             'message': 'User added to project successfully',
             'user_id': user_id,
             'project_id': invite_project_id,
             'new_role': invite_role,
-            'removed_roles': removed_roles
+            'removed_roles': removed_roles,
+            'access_token': access_token
         }, 200
 
 if __name__ == '__main__':
