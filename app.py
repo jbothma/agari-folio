@@ -3,6 +3,7 @@ from flask_restx import Api, Resource
 from auth import KeycloakAuth, require_auth, extract_user_info, require_permission, user_has_permission
 from permissions import PERMISSIONS
 from database import get_db_cursor, test_connection
+from templates import template_ns
 import os
 import json
 from datetime import datetime, date
@@ -45,6 +46,9 @@ api = Api(app,
 
 # Configure Flask-RESTX to use our custom JSON encoder
 app.config['RESTX_JSON'] = {'cls': CustomJSONEncoder}
+
+# Register template namespace
+api.add_namespace(template_ns)
 
 ##########################
 ### INFO
