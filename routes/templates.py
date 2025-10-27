@@ -14,7 +14,7 @@ from settings import (
     MINIO_ACCESS_KEY,
     MINIO_SECRET_KEY,
     MINIO_SECURED,
-    MINIO_BUCKET_STATE
+    MINIO_BUCKET,
 )
 import io
 import uuid
@@ -33,9 +33,6 @@ def get_minio_client():
         secure=MINIO_SECURED
     )
 
-
-# Get bucket name for templates
-TEMPLATES_BUCKET = MINIO_BUCKET_STATE
 
 # Create namespace
 template_ns = Namespace("templates", description="Template management endpoints")
@@ -113,13 +110,13 @@ class TemplateList(Resource):
 
             minio_client = get_minio_client()
 
-            if not minio_client.bucket_exists(TEMPLATES_BUCKET):
-                logger.info(f"Creating bucket: {TEMPLATES_BUCKET}")
-                minio_client.make_bucket(TEMPLATES_BUCKET)
+            if not minio_client.bucket_exists(MINIO_BUCKET):
+                logger.info(f"Creating bucket: {MINIO_BUCKET}")
+                minio_client.make_bucket(MINIO_BUCKET)
 
             logger.info(f"Uploading template {filename} to MinIO: {minio_object_id}")
             minio_client.put_object(
-                TEMPLATES_BUCKET,
+                MINIO_BUCKET,
                 minio_object_id,
                 io.BytesIO(file_data),
                 file_size,
@@ -155,7 +152,7 @@ class TemplateList(Resource):
                     # Delete old file from MinIO
                     try:
                         minio_client.remove_object(
-                            TEMPLATES_BUCKET, old_minio_object_id
+                            MINIO_BUCKET, old_minio_object_id
                         )
                     except S3Error:
                         pass  # Ignore if old file doesn't exist
@@ -255,7 +252,7 @@ class TemplateDetail(Resource):
                     # Delete file from MinIO
                     try:
                         minio_client = get_minio_client()
-                        minio_client.remove_object(TEMPLATES_BUCKET, deleted_template['minio_object_id'])
+                        minio_client.remove_object(MINIO_BUCKET, deleted_template['minio_object_id'])
                         logger.info(f"Deleted template file from MinIO: {deleted_template['minio_object_id']}")
                     except S3Error as e:
                         logger.warning(f"Failed to delete file from MinIO: {str(e)}")
@@ -361,7 +358,7 @@ class TemplateDownload(Resource):
             minio_client = get_minio_client()
 
             try:
-                response = minio_client.get_object(TEMPLATES_BUCKET, minio_object_id)
+                response = minio_client.get_object(MINIO_BUCKET, minio_object_id)
                 file_data = response.read()
                 response.close()
                 response.release_conn()

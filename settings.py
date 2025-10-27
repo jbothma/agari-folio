@@ -36,8 +36,7 @@ MINIO_ENDPOINT = os.getenv('MINIO_ENDPOINT', 'http://minio:9000')
 MINIO_ACCESS_KEY = os.getenv('MINIO_ACCESS_KEY', 'admin')
 MINIO_SECRET_KEY = os.getenv('MINIO_SECRET_KEY', 'admin123')
 MINIO_SECURED = os.getenv('MINIO_SECURED', 'false').lower() == 'true'
-MINIO_BUCKET_OBJECT = os.getenv('MINIO_BUCKET_OBJECT', 'object')
-MINIO_BUCKET_STATE = os.getenv('MINIO_BUCKET_STATE', 'state')
+MINIO_BUCKET = os.getenv('MINIO_BUCKET', 'folio')
 
 # Helper to get clean MinIO endpoint (without http:// or https://)
 MINIO_ENDPOINT_CLEAN = MINIO_ENDPOINT.replace('http://', '').replace('https://', '')
