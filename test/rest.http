@@ -1,17 +1,15 @@
 #@folio = http://localhost:5000
-@folio = http://localhost:8000
-#@folio = https://folio-staging.openup.org.za
-@keycloak = http://keycloak.local
-# @keycloak = https://keycloak-staging.openup.org.za
-# @keycloak = http://localhost:8080
+@folio = https://folio-staging.openup.org.za
+@keycloak = https://keycloak-staging.openup.org.za
+
 
 
 @realm = agari
 @client_id = dms
 @client_secret = VDyLEjGR3xDQvoQlrHq5AB6OwbW0Refc
 
-@username = system.admin@agari.tech
-#@username = owner@org1.ac.za
+# @username = system.admin@agari.tech
+@username = owner@org1.ac.za
 # @username = owner@org2.ac.za
 # @username = org-admin@org1.ac.za
 # @username = org-admin@org2.ac.za
@@ -35,7 +33,6 @@ username={{username}}
 
 ###
 @token = {{login.response.body.access_token}}
-
 
 ### Keycloak generate magic link
 @redirect_uri = https://agari.openup.org.za
@@ -140,8 +137,8 @@ Content-Type: application/json
 }
 
 ###
-@pathogen_id = {{create_pathogen.response.body.pathogen.id}}
-#@pathogen_id = 0683f0f6-04b3-4005-a078-383d0e3e88f2
+
+@pathogen_id = 0683f0f6-04b3-4005-a078-383d0e3e88f2
 
 # @name get_pathogen
 GET {{folio}}/pathogens/{{pathogen_id}}
@@ -201,8 +198,7 @@ Content-Type: application/json
 
 ###
 
-@project_id = {{create_project.response.body.project.id}}
-# @project_id = cc99173f-c585-4ac3-8a36-2178d52181ec
+@project_id = 8772fbeb-5c94-41d6-8159-48290874378b
 
 ### @name get_project
 GET {{folio}}/projects/{{project_id}}
@@ -300,19 +296,6 @@ Content-Type: application/json
 GET http://song.local/studies/all
 Authorization: Bearer {{token}}
 
-###
-
-# @name create_study_in_song
-POST http://song.local/studies/{{study_id}}/
-Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJLa0g4OUtCZV9lQTE4dk45RHpvSEpLOHFIWWhIS0g1UEFUby1XNTE1cFB3In0.eyJleHAiOjE3NjE0MzIxNjIsImlhdCI6MTc2MTQzMTg2MiwianRpIjoidHJydGNjOmI4ODYxYmU4LTRhMzAtNDJjZS04YTc0LWIzMDAyY2ZiYWY3YyIsImlzcyI6Imh0dHA6Ly9rZXljbG9hay5sb2NhbC9yZWFsbXMvYWdhcmkiLCJhdWQiOiJyZWFsbS1tYW5hZ2VtZW50Iiwic3ViIjoic2VydmljZS1hY2NvdW50LWRtcy1pZCIsInR5cCI6IkJlYXJlciIsImF6cCI6ImRtcyIsInJlYWxtX2FjY2VzcyI6eyJyb2xlcyI6WyJzeXN0ZW0tYWRtaW4iLCJyZWFsbS1hZG1pbiIsInVtYV9hdXRob3JpemF0aW9uIl19LCJyZXNvdXJjZV9hY2Nlc3MiOnsicmVhbG0tbWFuYWdlbWVudCI6eyJyb2xlcyI6WyJ2aWV3LXJlYWxtIiwidmlldy1pZGVudGl0eS1wcm92aWRlcnMiLCJtYW5hZ2Utb3JnYW5pemF0aW9ucyIsIm1hbmFnZS1pZGVudGl0eS1wcm92aWRlcnMiLCJpbXBlcnNvbmF0aW9uIiwicmVhbG0tYWRtaW4iLCJjcmVhdGUtY2xpZW50IiwibWFuYWdlLXVzZXJzIiwicXVlcnktcmVhbG1zIiwicHVibGlzaC1ldmVudHMiLCJ2aWV3LWF1dGhvcml6YXRpb24iLCJxdWVyeS1jbGllbnRzIiwicXVlcnktdXNlcnMiLCJtYW5hZ2UtZXZlbnRzIiwibWFuYWdlLXJlYWxtIiwidmlldy1vcmdhbml6YXRpb25zIiwidmlldy1ldmVudHMiLCJ2aWV3LXVzZXJzIiwidmlldy1jbGllbnRzIiwibWFuYWdlLWF1dGhvcml6YXRpb24iLCJtYW5hZ2UtY2xpZW50cyIsInF1ZXJ5LWdyb3VwcyJdfSwiZG1zIjp7InJvbGVzIjpbInVtYV9wcm90ZWN0aW9uIl19fSwic2NvcGUiOiJlbWFpbCBwcm9maWxlIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsInByZWZlcnJlZF91c2VybmFtZSI6InNlcnZpY2UtYWNjb3VudC1kbXMifQ.V7Cz6w6TjdZcWNmFhxM2DU5lJSb_2f0PduJ8vOjJbCi-3IjF-ZTCyNW8fj4x9FVfuJUvQ4g9yBW0ON6Q5c_z1XtYk7F2QAPG2GT9NK9y_cEz1rwh7lhtwCSaDC2UTrPXbADa6L7JfLIbHlgtyT1pqyw4azLdoPwXSgZ6J7sysrsL7XkTgCoMoieILDTDvlmRMwPf27qZ4e9D6NalZtwuYR-nq1rpT7RGMaqeDe0K6CSvH-o0alxtTaq-KS28vc0JTjHMY3qW6ttmbWTf45UM_s_Z-G-Uua65MzQebC4TkVFQCfYWBayv0Q1xcPqSdYrWFg3N25f4mQRVdS30yJVzBA
-Content-Type: application/json
-
-{
-    "studyId": "{{study_id}}",
-    "name": "name",
-    "description": "description",
-    "info": {}
-}
 
 ###
 
@@ -464,6 +447,7 @@ Content-Type: application/json
   "redirect_uri": "https://agari.openup.org.za/",
   "send_email": "false"
 }
+
 
 
 ##########################
