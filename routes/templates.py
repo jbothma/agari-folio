@@ -9,7 +9,13 @@ from auth import require_auth, extract_user_info, require_permission, keycloak_a
 from database import get_db_cursor
 from minio import Minio
 from minio.error import S3Error
-import os
+from settings import (
+    MINIO_ENDPOINT_CLEAN,
+    MINIO_ACCESS_KEY,
+    MINIO_SECRET_KEY,
+    MINIO_SECURED,
+    MINIO_BUCKET_STATE
+)
 import io
 import uuid
 from logging import getLogger
@@ -20,20 +26,16 @@ logger = getLogger(__name__)
 # Initialize MinIO client
 def get_minio_client():
     """Get configured MinIO client instance"""
-    endpoint = (
-        os.getenv("MINIO_ENDPOINT", "http://minio:9000")
-        .replace("http://", "")
-        .replace("https://", "")
+    return Minio(
+        MINIO_ENDPOINT_CLEAN,
+        access_key=MINIO_ACCESS_KEY,
+        secret_key=MINIO_SECRET_KEY,
+        secure=MINIO_SECURED
     )
-    access_key = os.getenv("MINIO_ACCESS_KEY", "admin")
-    secret_key = os.getenv("MINIO_SECRET_KEY", "admin123")
-    secured = os.getenv("MINIO_SECURED", "false").lower() == "true"
-
-    return Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secured)
 
 
 # Get bucket name for templates
-TEMPLATES_BUCKET = os.getenv("MINIO_BUCKET_STATE", "state")
+TEMPLATES_BUCKET = MINIO_BUCKET_STATE
 
 # Create namespace
 template_ns = Namespace("templates", description="Template management endpoints")

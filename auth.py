@@ -1,10 +1,10 @@
-import os
 import jwt
 import requests
 from functools import wraps
 from flask import request, jsonify, current_app
 from jwt.exceptions import InvalidTokenError, ExpiredSignatureError
 from permissions import PERMISSIONS
+from settings import KEYCLOAK_URL, KEYCLOAK_REALM, KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET
 
 class KeycloakAuth:
     def __init__(self, keycloak_url, realm, client_id, client_secret):
@@ -781,8 +781,8 @@ def require_permission(permission_name, resource_type=None, resource_id_arg=None
 
 
 keycloak_auth = KeycloakAuth(
-    keycloak_url=os.getenv('KEYCLOAK_URL', 'http://keycloak.local'),
-    realm=os.getenv('KEYCLOAK_REALM', 'agari'),
-    client_id=os.getenv('KEYCLOAK_CLIENT_ID', 'dms'),
-    client_secret=os.getenv('KEYCLOAK_CLIENT_SECRET', 'VDyLEjGR3xDQvoQlrHq5AB6OwbW0Refc')
+    keycloak_url=KEYCLOAK_URL,
+    realm=KEYCLOAK_REALM,
+    client_id=KEYCLOAK_CLIENT_ID,
+    client_secret=KEYCLOAK_CLIENT_SECRET
 )

@@ -4,7 +4,7 @@ from auth import keycloak_auth, require_auth, extract_user_info, require_permiss
 from permissions import PERMISSIONS
 from database import get_db_cursor, test_connection
 from routes.templates import template_ns
-import os
+from settings import OVERTURE_SONG_URL, OVERTURE_SCORE_URL, PORT
 import json
 from datetime import datetime, date
 from decimal import Decimal
@@ -25,8 +25,8 @@ class CustomJSONEncoder(json.JSONEncoder):
 app = Flask(__name__)
 app.json_encoder = CustomJSONEncoder
 
-song = os.getenv('OVERTURE_SONG', 'http://song.local')
-score = os.getenv('OVERTURE_SCORE', 'http://score.local')
+song = OVERTURE_SONG_URL
+score = OVERTURE_SCORE_URL
 
 app.keycloak_auth = keycloak_auth
 
@@ -1469,5 +1469,4 @@ class StudyAnalysisUnpublish(Resource):
 
 
 if __name__ == '__main__':
-    port = int(os.getenv('PORT', 8000))
-    app.run(debug=True, host='0.0.0.0', port=port)
+    app.run(debug=True, host='0.0.0.0', port=PORT)
