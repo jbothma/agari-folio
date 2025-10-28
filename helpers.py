@@ -1,3 +1,4 @@
+from email import message
 import os
 import subprocess
 import json
@@ -7,6 +8,8 @@ from flask import render_template_string
 from auth import KeycloakAuth
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail, From, To
+
+from database import get_db_cursor
 
 
 sg_api_key = os.getenv(
@@ -176,3 +179,48 @@ def access_revoked_notification(user_id):
     html_content = render_template_string(html_template)
 
     sendgrid_email(to_email, to_name, subject, html_content)
+
+def log_event(log_type, resource_id, log_entry):
+    try:
+        with get_db_cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO logs (log_type, resource_id, log_entry)
+                VALUES (%s, %s, %s)
+                """,
+                (log_type, resource_id, log_entry),
+            )
+            return True
+
+    except Exception as e:
+        print(f"Error saving submission log: {e}")
+        return False
+    
+def log_submission(project_id, analysis_id, user_id, status, message):
+    try:
+        with get_db_cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO submissions (project_id, analysis_id, user_id, status, message)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (project_id, analysis_id, user_id, status, json.dumps(message)),
+            )
+            return True
+
+    except Exception as e:
+        print(f"Error saving submission log: {e}")
+        return False
+
+
+def tsv_to_json(tsv_string):
+    lines = tsv_string.strip().split("\n")
+    headers = lines[0].split("\t")
+    json_list = []
+
+    for line in lines[1:]:
+        values = line.split("\t")
+        record = {headers[i]: values[i] for i in range(len(headers))}
+        json_list.append(record)
+
+    return json_list
