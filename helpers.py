@@ -112,6 +112,7 @@ def invite_user_to_project(user, redirect_uri, project_id, role):
     project_name = "test proj"  # project.get("name")
     subject = "You've been invited to AGARI"
 
+    hash_string = f"{user['id']}{project_id}"
     inv_token = hashlib.md5(user["id"].encode()).hexdigest()
     accept_link = f"{redirect_uri}/accept-invite?userid={user['id']}&token={inv_token}"
 
@@ -143,8 +144,7 @@ def invite_user_to_org(user, redirect_uri, org_id, role):
     project_name = "test org"  # org.get("name")
     subject = "You've been invited to AGARI"
 
-    hash_string = f"{user['id']}{org_id}_salt"
-
+    hash_string = f"{user['id']}{org_id}"
     inv_token = hashlib.md5(hash_string.encode()).hexdigest()
     accept_link = f"{redirect_uri}/accept-invite?userid={user['id']}&token={inv_token}"
 
