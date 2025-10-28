@@ -117,7 +117,7 @@ def invite_user_to_project(user, redirect_uri, project_id, role):
 
     hash_string = f"{user['id']}{project_id}"
     inv_token = hashlib.md5(user["id"].encode()).hexdigest()
-    accept_link = f"{redirect_uri}/accept-invite?userid={user['id']}&token={inv_token}"
+    accept_link = f"{redirect_uri}/accept-invite-project?userid={user['id']}&token={inv_token}"
 
     html_template = mjml_to_html("project_invite")
     html_content = render_template_string(
@@ -149,7 +149,7 @@ def invite_user_to_org(user, redirect_uri, org_id, role):
 
     hash_string = f"{user['id']}{org_id}"
     inv_token = hashlib.md5(hash_string.encode()).hexdigest()
-    accept_link = f"{redirect_uri}/accept-invite?userid={user['id']}&token={inv_token}"
+    accept_link = f"{redirect_uri}/accept-invite-org?userid={user['id']}&token={inv_token}"
 
     html_template = mjml_to_html("project_invite")
     html_content = render_template_string(
