@@ -112,12 +112,14 @@ def invite_user_to_project(user, redirect_uri, project_id, role):
     else:
         to_name = ""
     to_email = user["email"]
-    project_name = "test proj"  # project.get("name")
     subject = "You've been invited to AGARI"
+    project_name = "test proj"  # project.get("name")
 
     hash_string = f"{user['id']}{project_id}"
-    inv_token = hashlib.md5(user["id"].encode()).hexdigest()
-    accept_link = f"{redirect_uri}/accept-invite?userid={user['id']}&token={inv_token}"
+    inv_token = hashlib.md5(hash_string.encode()).hexdigest()
+    accept_link = (
+        f"{redirect_uri}/accept-invite-project?userid={user['id']}&token={inv_token}"
+    )
 
     html_template = mjml_to_html("project_invite")
     html_content = render_template_string(
@@ -144,16 +146,18 @@ def invite_user_to_org(user, redirect_uri, org_id, role):
     else:
         to_name = ""
     to_email = user["email"]
-    project_name = "test org"  # org.get("name")
+    org_name = "test org"  # org.get("name")
     subject = "You've been invited to AGARI"
 
     hash_string = f"{user['id']}{org_id}"
     inv_token = hashlib.md5(hash_string.encode()).hexdigest()
-    accept_link = f"{redirect_uri}/accept-invite?userid={user['id']}&token={inv_token}"
+    accept_link = (
+        f"{redirect_uri}/accept-invite-org?userid={user['id']}&token={inv_token}"
+    )
 
-    html_template = mjml_to_html("project_invite")
+    html_template = mjml_to_html("new_user")
     html_content = render_template_string(
-        html_template, project_name=project_name, accept_link=accept_link
+        html_template, org_name=org_name, accept_link=accept_link
     )
 
     response = sendgrid_email(to_email, to_name, subject, html_content)
@@ -180,6 +184,7 @@ def access_revoked_notification(user_id):
 
     sendgrid_email(to_email, to_name, subject, html_content)
 
+
 def log_event(log_type, resource_id, log_entry):
     try:
         with get_db_cursor() as cursor:
@@ -195,7 +200,8 @@ def log_event(log_type, resource_id, log_entry):
     except Exception as e:
         print(f"Error saving submission log: {e}")
         return False
-    
+
+
 def log_submission(project_id, analysis_id, user_id, status, message):
     try:
         with get_db_cursor() as cursor:
