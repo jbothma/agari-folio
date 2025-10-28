@@ -155,9 +155,9 @@ def invite_user_to_org(user, redirect_uri, org_id, role):
         f"{redirect_uri}/accept-invite-org?userid={user['id']}&token={inv_token}"
     )
 
-    html_template = mjml_to_html("project_invite")
+    html_template = mjml_to_html("new_user")
     html_content = render_template_string(
-        html_template, project_name=org_name, accept_link=accept_link
+        html_template, org_name=org_name, accept_link=accept_link
     )
 
     response = sendgrid_email(to_email, to_name, subject, html_content)
@@ -167,37 +167,6 @@ def invite_user_to_org(user, redirect_uri, org_id, role):
         keycloak_auth.add_attribute_value(user["id"], "invite_org_token", inv_token)
         keycloak_auth.add_attribute_value(user["id"], "invite_org_id", org_id)
         keycloak_auth.add_attribute_value(user["id"], "invite_org_role", role)
-        return f"Invitation email sent successfully"
-    else:
-        return {"error": "Failed to send invitation email"}, 500
-
-
-def invite_user_to_platform(user, redirect_uri):
-    if user.get("attributes"):
-        name = user["attributes"].get("name", [""])[0]
-        surname = user["attributes"].get("surname", [""])[0]
-        to_name = f"{name} {surname}".strip()
-    else:
-        to_name = ""
-    to_email = user["email"]
-    subject = "You've been invited to AGARI"
-
-    hash_string = f"{user['id']}"
-    inv_token = hashlib.md5(hash_string.encode()).hexdigest()
-    accept_link = (
-        f"{redirect_uri}/accept-invite-platform?userid={user['id']}&token={inv_token}"
-    )
-
-    html_template = mjml_to_html("new_user")
-    html_content = render_template_string(
-        html_template, accept_link=accept_link
-    )
-
-    response = sendgrid_email(to_email, to_name, subject, html_content)
-
-    if response.status_code in [200, 201, 202]:
-        # assign temp invite attributes to user
-        keycloak_auth.add_attribute_value(user["id"], "invite_platform_token", inv_token)
         return f"Invitation email sent successfully"
     else:
         return {"error": "Failed to send invitation email"}, 500
@@ -215,6 +184,7 @@ def access_revoked_notification(user_id):
 
     sendgrid_email(to_email, to_name, subject, html_content)
 
+
 def log_event(log_type, resource_id, log_entry):
     try:
         with get_db_cursor() as cursor:
@@ -230,7 +200,8 @@ def log_event(log_type, resource_id, log_entry):
     except Exception as e:
         print(f"Error saving submission log: {e}")
         return False
-    
+
+
 def log_submission(project_id, analysis_id, user_id, status, message):
     try:
         with get_db_cursor() as cursor:
