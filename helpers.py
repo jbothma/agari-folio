@@ -115,6 +115,7 @@ def invite_user_to_project(user, redirect_uri, project_id, role):
     project_name = "test proj"  # project.get("name")
     subject = "You've been invited to AGARI"
 
+    hash_string = f"{user['id']}{project_id}"
     inv_token = hashlib.md5(user["id"].encode()).hexdigest()
     accept_link = f"{redirect_uri}/accept-invite?userid={user['id']}&token={inv_token}"
 
@@ -130,6 +131,38 @@ def invite_user_to_project(user, redirect_uri, project_id, role):
         keycloak_auth.add_attribute_value(user["id"], "invite_token", inv_token)
         keycloak_auth.add_attribute_value(user["id"], "invite_project_id", project_id)
         keycloak_auth.add_attribute_value(user["id"], "invite_role", role)
+        return f"Invitation email sent successfully"
+    else:
+        return {"error": "Failed to send invitation email"}, 500
+
+
+def invite_user_to_org(user, redirect_uri, org_id, role):
+    if user.get("attributes"):
+        name = user["attributes"].get("name", [""])[0]
+        surname = user["attributes"].get("surname", [""])[0]
+        to_name = f"{name} {surname}".strip()
+    else:
+        to_name = ""
+    to_email = user["email"]
+    project_name = "test org"  # org.get("name")
+    subject = "You've been invited to AGARI"
+
+    hash_string = f"{user['id']}{org_id}"
+    inv_token = hashlib.md5(hash_string.encode()).hexdigest()
+    accept_link = f"{redirect_uri}/accept-invite?userid={user['id']}&token={inv_token}"
+
+    html_template = mjml_to_html("project_invite")
+    html_content = render_template_string(
+        html_template, project_name=project_name, accept_link=accept_link
+    )
+
+    response = sendgrid_email(to_email, to_name, subject, html_content)
+
+    if response.status_code in [200, 201, 202]:
+        # assign temp invite attributes to user
+        keycloak_auth.add_attribute_value(user["id"], "invite_org_token", inv_token)
+        keycloak_auth.add_attribute_value(user["id"], "invite_org_id", org_id)
+        keycloak_auth.add_attribute_value(user["id"], "invite_org_role", role)
         return f"Invitation email sent successfully"
     else:
         return {"error": "Failed to send invitation email"}, 500

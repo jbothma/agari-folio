@@ -8,7 +8,7 @@ import json
 from datetime import datetime, date
 from decimal import Decimal
 import requests
-from helpers import magic_link, invite_user_to_project, access_revoked_notification, log_event, log_submission, tsv_to_json
+from helpers import magic_link, invite_user_to_project, invite_user_to_org, access_revoked_notification, log_event, log_submission, tsv_to_json
 
 
 # Custom JSON encoder to handle datetime and other types
@@ -856,7 +856,8 @@ class OrganisationUsers(Resource):
                 return {'error': 'No JSON data provided'}, 400
             
             user_id = data.get('user_id')
-            role = data.get('role') 
+            role = data.get('role')
+            redirect_uri = data.get('redirect_uri')
             
             if not user_id:
                 return {'error': 'User ID is required'}, 400
@@ -868,32 +869,10 @@ class OrganisationUsers(Resource):
             if not user:
                 return {'error': 'User not found in Keycloak'}, 404
 
-            # Prepare update data with proper structure
-            update_data = {
-                'attributes': {
-                    'organisation_id': [org_id]  
-                },
-                'realm_roles': [f'agari-{role}']  
-            }
+            # Update user's organisation_id and org_role attributes in Keycloak
+            response = invite_user_to_org(user, redirect_uri, org_id, role)
+            return response
             
-            result = keycloak_auth.update_user(user_id, update_data)
-            
-            if result.get('success'):
-                return {
-                    'message': f'User added to organisation with role "{role}"',
-                    'user_id': user_id,
-                    'organisation_id': org_id,
-                    'role': role,
-                    'realm_role_assigned': f'agari-{role}',
-                    'update_details': result.get('updates', {})
-                }
-            else:
-                return {
-                    'error': 'Failed to add user to organisation',
-                    'details': result.get('error'),
-                    'errors': result.get('errors', {})
-                }, 500
-                
         except Exception as e:
             return {'error': f'Failed to add user to organisation: {str(e)}'}, 500
 
@@ -2176,7 +2155,6 @@ class ProjectUserConfirm(Resource):
     ### POST /invites/<token>/accept ###
 
     @api.doc('accept_project_invite')
-    @require_auth(keycloak_auth)
     def post(self, token):
         user = keycloak_auth.get_users_by_attribute('invite_token', token)[0]
         user_id = user["user_id"]
@@ -2214,13 +2192,68 @@ class ProjectUserConfirm(Resource):
         keycloak_auth.remove_attribute_value(user_id, 'invite_project_id', invite_project_id)
         keycloak_auth.remove_attribute_value(user_id, 'invite_role', invite_role)
 
+        # Get access token for the user
+        access_token = keycloak_auth.get_user_access_token(user_id)
+        if not access_token:
+            return {'error': f'"Failed to obtain access token for user {user_id}'}, 500
+
         return {
             'message': 'User added to project successfully',
             'user_id': user_id,
             'project_id': invite_project_id,
             'new_role': invite_role,
-            'removed_roles': removed_roles
+            'removed_roles': removed_roles,
+            'access_token': access_token
         }, 200
+
+
+@invite_ns.route('/organisation/<string:token>/accept')
+class OrganisationUserConfirm(Resource):
+    ### POST /invites/<token>/accept ###
+
+    @api.doc('accept_organisation_invite')
+    def post(self, token):
+        user = keycloak_auth.get_users_by_attribute('invite_org_token', token)[0]
+        user_id = user["user_id"]
+
+        invite_org_role = user["attributes"].get("invite_org_role", [""])[0]
+        invite_org_id = user["attributes"].get("invite_org_id", [""])[0]
+
+        # Prepare update data with proper structure
+        update_data = {
+            'attributes': {
+                'organisation_id': [invite_org_id]
+            },
+            'realm_roles': [f'agari-{invite_org_role}']
+        }
+        result = keycloak_auth.update_user(user_id, update_data)
+
+        # Remove temp attributes
+        keycloak_auth.remove_attribute_value(user_id, 'invite_org_token', token)
+        keycloak_auth.remove_attribute_value(user_id, 'invite_org_id', invite_org_id)
+        keycloak_auth.remove_attribute_value(user_id, 'invite_org_role', invite_org_role)
+
+        # Get access token for the user
+        access_token = keycloak_auth.get_user_access_token(user_id)
+        if not access_token:
+            return {'error': f'"Failed to obtain access token for user {user_id}'}, 500
+
+        if result.get('success'):
+            return {
+                'message': f'User added to organisation with role "{invite_org_role}"',
+                'user_id': user_id,
+                'organisation_id': invite_org_id,
+                'role': invite_org_role,
+                'realm_role_assigned': f'agari-{invite_org_role}',
+                'update_details': result.get('updates', {})
+            }
+        else:
+            return {
+                'error': 'Failed to add user to organisation',
+                'details': result.get('error'),
+                'errors': result.get('errors', {})
+            }, 500
+
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 8000))
