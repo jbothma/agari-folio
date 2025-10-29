@@ -1538,7 +1538,7 @@ class ProjectSubmissions(Resource):
             }
             
             # Forward the request to SONG
-            song_submit_url = f"{song}/submit/{metadata['studyId']}/"
+            song_submit_url = f"{song}/submit/{metadata['studyId']}?allowDuplicates=true"
             song_response = requests.post(song_submit_url, headers=song_headers, json=data)
 
             print(f"SONG submit response status: {song_response.status_code}")
