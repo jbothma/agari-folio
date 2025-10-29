@@ -496,7 +496,7 @@ Authorization: Bearer {{token}}
 
 ###
 
-@object_id = 6b7d617a-3a3f-5941-86bc-b16236587de9
+@object_id = 0ebc4e28-b0c7-590b-bc36-f4344d983329
 
 # @name upload_init
 POST {{folio}}/projects/{{project_id}}/submissions/{{submission_id}}/upload/init
@@ -514,7 +514,7 @@ Content-Type: application/json
 
 # @name upload_file_to_minio
 
-@url = https://minio-staging.openup.org.za/object/data/6b7d617a-3a3f-5941-86bc-b16236587de9?uploadId=Mjc1Njc3MDktNmZiNS00MTczLWEwOTEtOGQ5Njg4Y2YzZDg5LjJjZWRjZDRjLTIxYjItNDM5ZS1hMWNmLTc5N2ViYjE0NTYwNQ&partNumber=1&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20251029T185142Z&X-Amz-SignedHeaders=host&X-Amz-Expires=518399&X-Amz-Credential=admin%2F20251029%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Signature=7123f153aec588fb70259da7b79f4d80287dcdc178ebf7ee223cca080db4892f
+@url = https://minio-staging.openup.org.za/object/data/0ebc4e28-b0c7-590b-bc36-f4344d983329?uploadId=Mjc1Njc3MDktNmZiNS00MTczLWEwOTEtOGQ5Njg4Y2YzZDg5LjNlNDBiMjcxLTA1MGMtNDQ3ZC1iNjU5LTZkZTdkYmU3YjgzNQ&partNumber=1&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20251029T185530Z&X-Amz-SignedHeaders=host&X-Amz-Expires=518399&X-Amz-Credential=admin%2F20251029%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Signature=f44afe7395cc8b7fa0411e6e12e0a19b7269a90aaf64c3157bb9d075d971cdbc
 PUT {{url}}
 Content-Type: application/octet-stream
 
@@ -531,10 +531,10 @@ Content-Type: application/json
 
 {
   "object_id": "{{object_id}}",
-  "upload_id": "Mjc1Njc3MDktNmZiNS00MTczLWEwOTEtOGQ5Njg4Y2YzZDg5LjhhMjJhZWM4LWExOGItNGI5ZC1hZjRkLTZmYWFjZTNhZjBjNw",
+  "upload_id": "Mjc1Njc3MDktNmZiNS00MTczLWEwOTEtOGQ5Njg4Y2YzZDg5LjNlNDBiMjcxLTA1MGMtNDQ3ZC1iNjU5LTZkZTdkYmU3YjgzNQ",
   "etag": "bda8ea08a3e76e699a0248038737649d",
   "part_number": 1,
-  "md5": "be4d1f491dy7a9r4a6bf6f325c71b602"
+  "md5": "1dfd8800948e9f2bf44942003f9265fm"
 }
 
 ###
