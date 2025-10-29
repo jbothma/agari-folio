@@ -232,10 +232,10 @@ def log_submission(project_id, analysis_id, user_id, status, message):
         with get_db_cursor() as cursor:
             cursor.execute(
                 """
-                INSERT INTO submissions (project_id, analysis_id, user_id, status, message)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO submissions_log (submission_id, user_id, status, message)
+                VALUES (%s, %s, %s, %s)
                 """,
-                (project_id, analysis_id, user_id, status, json.dumps(message)),
+                (submission_id, user_id, status, json.dumps(message)),
             )
             return True
 
