@@ -114,19 +114,6 @@ def invite_user_to_project(user, redirect_uri, project_id, role):
     to_email = user["email"]
     subject = "You've been invited to AGARI"
 
-    with get_db_cursor() as cursor:
-        cursor.execute(
-            """
-            SELECT *
-            FROM projects
-            WHERE id = %s AND deleted_at IS NULL
-        """,
-            (project_id),
-        )
-        project = cursor.fetchone()
-        if not project:
-            return {"error": "Project not found"}, 404
-
     hash_string = f"{user['id']}{project_id}"
     inv_token = hashlib.md5(hash_string.encode()).hexdigest()
     accept_link = (
@@ -135,7 +122,7 @@ def invite_user_to_project(user, redirect_uri, project_id, role):
 
     html_template = mjml_to_html("project_invite")
     html_content = render_template_string(
-        html_template, project_name=project["name"], accept_link=accept_link
+        html_template, project_name="test project", accept_link=accept_link
     )
 
     response = sendgrid_email(to_email, to_name, subject, html_content)
