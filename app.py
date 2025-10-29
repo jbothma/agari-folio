@@ -9,7 +9,7 @@ from datetime import datetime, date
 from decimal import Decimal
 import requests
 from helpers import magic_link, invite_user_to_project, invite_user_to_org, access_revoked_notification, log_event, log_submission, tsv_to_json
-
+import uuid
 
 # Custom JSON encoder to handle datetime and other types
 class CustomJSONEncoder(json.JSONEncoder):
@@ -1565,6 +1565,8 @@ class ProjectSubmissions(Resource):
 
                 log_submission(submission_id, request.user.get('user_id'), song_response.status_code, song_response.text)
 
+                response_data['submission_id'] = submission_id
+
             return response_data, song_response.status_code
 
         except Exception as e:
@@ -1585,18 +1587,30 @@ class ProjectSubmission(Resource):
     
         try:
             with get_db_cursor() as cursor:
+                
+                # Clean and validate project_id
+                try:
+                    clean_project_id = str(uuid.UUID(project_id.strip('"')))
+                except ValueError:
+                    return {'error': f'Invalid project_id format: {project_id}'}, 400
+                
+                # Clean and validate submission_id  
+                try:
+                    clean_submission_id = str(uuid.UUID(submission_id.strip('"')))
+                except ValueError:
+                    return {'error': f'Invalid submission_id format: {submission_id}'}, 400
+                
                 cursor.execute("""
                     SELECT s.*
                     FROM submissions s
                     WHERE s.project_id = %s AND s.id = %s
-                """, (project_id, submission_id))
+                """, (clean_project_id, clean_submission_id))
                 
                 submission = cursor.fetchone()
                 
                 if not submission:
                     return {'error': 'Submission not found for this project'}, 404
                 
-
                 # get analysis status from SONG
                 analysis_id = submission.get('analysis_id')
                 study_id = submission.get('study_id')
@@ -1618,7 +1632,6 @@ class ProjectSubmission(Resource):
                         song_data = song_response.json()
                         submission['analysis'] = song_data
 
-                
                 return submission
         except Exception as e:
             return {'error': f'Database error: {str(e)}'}, 500
