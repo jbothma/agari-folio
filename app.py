@@ -1419,37 +1419,37 @@ class ProjectSubmissions(Resource):
     @require_permission('view_project_submissions', resource_type='project', resource_id_arg='project_id')
     def get(self, project_id):
 
-    """List all submissions associated with a project"""
+        """List all submissions associated with a project"""
 
-    try:
-        with get_db_cursor() as cursor:
-            cursor.execute("""
-                SELECT s.*
-                FROM submissions s
-                WHERE s.project_id = %s
-                ORDER BY s.created_at DESC
-            """, (project_id,))
-            
-            submissions = cursor.fetchall()
-            
-            # Get logs for each submission
-            for submission in submissions:
+        try:
+            with get_db_cursor() as cursor:
                 cursor.execute("""
-                    SELECT *
-                    FROM submissions_log
-                    WHERE submission_id = %s
-                    ORDER BY created_at DESC
-                """, (submission['id'],))
+                    SELECT s.*
+                    FROM submissions s
+                    WHERE s.project_id = %s
+                    ORDER BY s.created_at DESC
+                """, (project_id,))
                 
-                submission['logs'] = cursor.fetchall()
-            
-            return {
-                'project_id': project_id,
-                'total_submissions': len(submissions),
-                'submissions': submissions
-            }
-    except Exception as e:
-        return {'error': f'Database error: {str(e)}'}, 500
+                submissions = cursor.fetchall()
+                
+                # Get logs for each submission
+                for submission in submissions:
+                    cursor.execute("""
+                        SELECT *
+                        FROM submissions_log
+                        WHERE submission_id = %s
+                        ORDER BY created_at DESC
+                    """, (submission['id'],))
+                    
+                    submission['logs'] = cursor.fetchall()
+                
+                return {
+                    'project_id': project_id,
+                    'total_submissions': len(submissions),
+                    'submissions': submissions
+                }
+        except Exception as e:
+            return {'error': f'Database error: {str(e)}'}, 500
         
     
 
