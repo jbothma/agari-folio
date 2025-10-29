@@ -74,7 +74,7 @@
     <mj-section padding="0 0 16px 0">
       <mj-column>
         <mj-text>
-          You're invited to join <strong>[Organisation&nbsp;Name]</strong> on AGARI.<br />
+          You're invited to join <strong>{{ org_name }}</strong> on AGARI.<br />
           Click the button below to create your account.
         </mj-text>
       </mj-column>
@@ -84,7 +84,7 @@
     <mj-section padding="0 0 16px 0">
       <mj-column>
         <mj-text align="center">
-          <a href="https://agari.example/accept-invite?token={{TOKEN}}" class="agari-btn">
+          <a href="{{ accept_link }}" class="agari-btn">
             Accept Invitation
           </a>
         </mj-text>
