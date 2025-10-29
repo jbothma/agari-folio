@@ -196,15 +196,15 @@ def log_event(log_type, resource_id, log_entry):
         print(f"Error saving submission log: {e}")
         return False
     
-def log_submission(project_id, analysis_id, user_id, status, message):
+def log_submission(submission_id, user_id, status, message):
     try:
         with get_db_cursor() as cursor:
             cursor.execute(
                 """
-                INSERT INTO submissions (project_id, analysis_id, user_id, status, message)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO submissions_log (submission_id, user_id, status, message)
+                VALUES (%s, %s, %s, %s)
                 """,
-                (project_id, analysis_id, user_id, status, json.dumps(message)),
+                (submission_id, user_id, status, json.dumps(message)),
             )
             return True
 

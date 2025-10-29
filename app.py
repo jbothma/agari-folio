@@ -877,12 +877,6 @@ class OrganisationUsers(Resource):
             return {'error': f'Failed to add user to organisation: {str(e)}'}, 500
 
 
-
-
-    
-
-
-
 ##########################
 ### PROJECTS
 ##########################
@@ -1445,6 +1439,497 @@ class ProjectSubmissions(Resource):
                 }
         except Exception as e:
             return {'error': f'Database error: {str(e)}'}, 500
+        
+    
+
+    ### POST /projects/<project_id>/submissions ###
+
+    @api.doc('upload_submissions')
+    @require_auth(keycloak_auth)
+    @require_permission('upload_submission', resource_type='project', resource_id_arg='project_id')
+    def post(self, project_id):
+
+        """Submit an analysis (submission in Agari) to SONG (proxy endpoint)
+        
+        Accepts either:
+        1. JSON data directly in request body
+        2. TSV file upload with JSON metadata containing files array
+        """
+
+        try:
+            data = None
+            
+            # Check if this is a file upload (multipart/form-data)
+            if request.files and 'file' in request.files:
+                file = request.files['file']
+                
+                if file.filename == '':
+                    return {'error': 'No file selected'}, 400
+                
+                # Check if it's a TSV file
+                if not file.filename.lower().endswith(('.tsv', '.txt')):
+                    return {'error': 'File must be a TSV file (.tsv or .txt)'}, 400
+                
+                try:
+                    # Read and convert TSV to JSON
+                    file_content = file.read().decode('utf-8')
+                    
+                    samples_data = tsv_to_json(file_content)
+                    
+                    metadata_json = request.form.get('metadata')
+
+                    study_id = request.form.get('studyId')
+
+                    submission_name = request.form.get('submissionName', 'TSV Upload Submission')
+
+                    if not metadata_json:
+                        return {'error': 'Metadata with files array is required when uploading TSV'}, 400
+                    
+                    if not study_id:
+                        return {'error': 'studyId is required when uploading TSV'}, 400
+
+                    if not submission_name:
+                        return {'error': 'submissionName is required when uploading TSV'}, 400
+
+                    try:
+                        metadata = json.loads(metadata_json)
+                    except json.JSONDecodeError as e:
+                        return {'error': f'Invalid JSON in metadata field: {str(e)}'}, 400
+                    
+                    # Validate that files array exists in metadata
+                    if 'files' not in metadata:
+                        return {'error': 'files array required in metadata'}, 400
+                    
+                    # Build the complete payload
+                    data = {
+                        "studyId": study_id,
+                        "analysisType": {
+                            "name": "one_to_many_schema",
+                            "version": 1
+                        },
+                        "files": metadata['files'],
+                        "samples": samples_data
+                    }
+                    
+                    print(f"Final payload structure: studyId={data['studyId']}, samples_count={len(data['samples'])}, files_count={len(data['files'])}")
+                    
+                except UnicodeDecodeError:
+                    return {'error': 'File must be UTF-8 encoded'}, 400
+                except Exception as e:
+                    print(f"Error processing TSV: {str(e)}")
+                    return {'error': f'Failed to process TSV file: {str(e)}'}, 500
+            else:
+                print("No file upload detected, checking for JSON body")
+                # Get JSON data directly from request body
+                data = request.get_json()
+                
+            if not data:
+                return {'error': 'No data provided (either JSON or TSV file with metadata required)'}, 400
+
+            # Get client token for SONG API
+            song_token = keycloak_auth.get_client_token()
+            if not song_token:
+                return {'error': 'Failed to authenticate with SONG service'}, 500
+
+            # Set up headers for SONG request
+            song_headers = {
+                'Authorization': f'Bearer {song_token}',
+                'Content-Type': 'application/json'
+            }
+            
+            # Forward the request to SONG
+            song_submit_url = f"{song}/submit/{study_id}/"
+            song_response = requests.post(song_submit_url, headers=song_headers, json=data)
+
+            print(f"SONG submit response status: {song_response.status_code}")
+            
+            # Forward SONG's response directly
+            try:
+                response_data = song_response.json()
+            except:
+                response_data = {'message': song_response.text}
+
+            if song_response.status_code == 200:
+                analysis_id = response_data.get('analysisId')
+            else:
+                analysis_id = None
+
+            with get_db_cursor() as cursor:
+                cursor.execute("""
+                    INSERT INTO submissions (project_id, study_id, analysis_id, submission_name)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING id
+                """, (project_id, study_id, analysis_id, submission_name))
+                
+                submission_id = cursor.fetchone()['id']
+
+                log_submission(submission_id, request.user.get('user_id'), song_response.status_code, 'Submission forwarded to SONG')
+
+            return response_data, song_response.status_code
+
+        except Exception as e:
+            return {'error': f'Failed to submit analysis: {str(e)}'}, 500
+        
+
+@project_ns.route('/<string:project_id>/submissions/<string:submission_id>')
+class ProjectSubmission(Resource):
+    
+    ### GET /projects/<project_id>/submissions/<submission_id> ###
+
+    @api.doc('get_project_submission')
+    @require_auth(keycloak_auth)
+    @require_permission('view_project_submissions', resource_type='project', resource_id_arg='project_id')
+    def get(self, project_id, submission_id):
+
+        """Get details of a specific submission associated with a project"""
+    
+        try:
+            with get_db_cursor() as cursor:
+                cursor.execute("""
+                    SELECT s.*
+                    FROM submissions s
+                    WHERE s.project_id = %s AND s.id = %s
+                """, (project_id, submission_id))
+                
+                submission = cursor.fetchone()
+                
+                if not submission:
+                    return {'error': 'Submission not found for this project'}, 404
+                
+
+                # get analysis status from SONG
+                analysis_id = submission.get('analysis_id')
+                study_id = submission.get('study_id')
+
+                if analysis_id and study_id:
+                    # Get client token for SONG API
+                    song_token = keycloak_auth.get_client_token()
+                    if not song_token:
+                        return {'error': 'Failed to authenticate with SONG service'}, 500
+
+                    song_headers = {
+                        'Authorization': f'Bearer {song_token}',
+                        'Content-Type': 'application/json'
+                    }
+
+                    song_response = requests.get(f"{song}/studies/{study_id}/analysis/{analysis_id}", headers=song_headers)
+
+                    if song_response.status_code == 200:
+                        song_data = song_response.json()
+                        submission['analysis'] = song_data
+
+                
+                return submission
+        except Exception as e:
+            return {'error': f'Database error: {str(e)}'}, 500
+
+
+@project_ns.route('/<string:project_id>/submissions/<string:submission_id>/upload/init')
+class ProjectSubmissionUploadInit(Resource):
+
+    ### POST /projects/<project_id>/submissions/<submission_id>/upload/init ###
+
+    @api.doc('init_submission_upload')
+    @require_auth(keycloak_auth)
+    @require_permission('upload_submission', resource_type='project', resource_id_arg='project_id')
+    def post(self, project_id, submission_id):
+
+        """Initialize upload with SCORE (Step 1 of upload process)"""
+
+        try:
+
+            data = request.get_json()
+
+            object_id = data.get('object_id')
+            file_size = data.get('fileSize')
+            file_md5 = data.get('md5')
+            overwrite = data.get('overwrite', True)
+
+            if not object_id or not file_size or not file_md5:
+                return {'error': 'object_id, fileSize, and md5 are required'}, 400
+
+            # Get client token for SCORE API
+            score_token = keycloak_auth.get_client_token()
+            if not score_token:
+                return {'error': 'Failed to authenticate with SCORE service'}, 500
+
+            score_headers = {
+                'Authorization': f'Bearer {score_token}',
+                'Content-Type': 'application/x-www-form-urlencoded'
+            }
+
+            # Initialize upload with SCORE
+            init_upload_url = f"{score}/upload/{object_id}/uploads"
+            init_data = {
+                'fileSize': file_size,
+                'md5': file_md5,
+                'overwrite': overwrite
+            }
+
+            init_response = requests.post(init_upload_url, headers=score_headers, data=init_data)
+            
+            if init_response.status_code != 200:
+                log_submission(submission_id, request.user.get('user_id'), init_response.status_code, f'Failed to initialize upload: {init_response.status_code} - {init_response.text}')
+                return {'error': f'Failed to initialize upload: {init_response.status_code} - {init_response.text}'}, init_response.status_code
+
+            log_submission(submission_id, request.user.get('user_id'), init_response.status_code, 'Upload initialized successfully')
+            return init_response.json(), 200
+
+        except Exception as e:
+            log_submission(submission_id, request.user.get('user_id'), 500, f'Failed to initialize upload: {str(e)}')
+            return {'error': f'Failed to initialize upload: {str(e)}'}, 500
+
+
+@project_ns.route('/<string:project_id>/submissions/<string:submission_id>/upload/finalise-part')
+class ProjectSubmissionUploadFinalisePart(Resource):
+
+    ### POST /projects/<project_id>/submissions/<submission_id>/upload/finalise-part ###
+
+    @api.doc('finalise_part_upload')
+    @require_auth(keycloak_auth)
+    @require_permission('upload_submission', resource_type='project', resource_id_arg='project_id')
+    def post(self, project_id, submission_id):
+
+        """Finalize part upload with SCORE (Step 3 of upload process)"""
+
+        try:
+            data = request.get_json()
+            if not data:
+                return {'error': 'No JSON data provided'}, 400
+
+            object_id = data.get('object_id')
+            upload_id = data.get('upload_id')
+            etag = data.get('etag')
+            object_md5 = data.get('md5')
+            part_number = data.get('part_number', 1)
+
+            if not all([etag]):
+                return {'error': 'object_id, upload_id, etag, and object_md5 are required'}, 400
+
+            # Get client token for SCORE API
+            score_token = keycloak_auth.get_client_token()
+            if not score_token:
+                return {'error': 'Failed to authenticate with SCORE service'}, 500
+
+            score_json_headers = {
+                'Authorization': f'Bearer {score_token}',
+                'Content-Type': 'application/json'
+            }
+
+            # Finalise part upload
+            finalise_part_url = f"{score}/upload/{object_id}/parts"
+            finalise_part_params = {
+                'partNumber': part_number,
+                'etag': etag,
+                'md5': object_md5,
+                'uploadId': upload_id
+            }
+            
+            finalise_part_response = requests.post(
+                finalise_part_url, 
+                headers=score_json_headers, 
+                params=finalise_part_params
+            )
+
+            if finalise_part_response.status_code != 200:
+                log_submission(project_id, submission_id, request.user.get('user_id'), finalise_part_response.status_code, f'Failed to finalise part upload: {finalise_part_response.status_code} - {finalise_part_response.text}')
+                return {'error': f'Failed to finalise part upload: {finalise_part_response.status_code} - {finalise_part_response.text}'}, finalise_part_response.status_code
+
+            log_submission(project_id, submission_id, request.user.get('user_id'), finalise_part_response.status_code, 'Part upload finalised successfully')
+            return finalise_part_response.json(), 200
+
+        except Exception as e:
+            log_submission(project_id, submission_id, request.user.get('user_id'), 500, f'Failed to finalise part upload: {str(e)}')
+            return {'error': f'Failed to finalise part upload: {str(e)}'}, 500
+
+
+@project_ns.route('/<string:project_id>/submissions/<string:submission_id>/upload/finalise')
+class ProjectSubmissionUploadFinalise(Resource):
+
+    ### POST /projects/<project_id>/submissions/<submission_id>/upload/finalise ###
+
+    @api.doc('finalize_upload')
+    @require_auth(keycloak_auth)
+    @require_permission('upload_submission', resource_type='project', resource_id_arg='project_id')
+    def post(self, project_id, submission_id):
+
+        """Finalize complete upload with SCORE (Step 4 of upload process)"""
+
+        try:
+            data = request.get_json()
+            if not data:
+                return {'error': 'No JSON data provided'}, 400
+
+            object_id = data.get('object_id')
+            upload_id = data.get('upload_id')
+
+            if not object_id or not upload_id:
+                return {'error': 'object_id and upload_id are required'}, 400
+
+            # Get client token for SCORE API
+            score_token = keycloak_auth.get_client_token()
+            if not score_token:
+                return {'error': 'Failed to authenticate with SCORE service'}, 500
+
+            score_json_headers = {
+                'Authorization': f'Bearer {score_token}',
+                'Content-Type': 'application/json'
+            }
+
+            # Finalize complete upload
+            finalize_upload_url = f"{score}/upload/{object_id}"
+            finalize_upload_params = {'uploadId': upload_id}
+            
+            finalize_upload_response = requests.post(
+                finalize_upload_url, 
+                headers=score_json_headers, 
+                params=finalize_upload_params
+            )
+            
+            if finalize_upload_response.status_code != 200:
+                log_submission(project_id, submission_id, request.user.get('user_id'), finalize_upload_response.status_code, f'Failed to finalise upload: {finalize_upload_response.status_code} - {finalize_upload_response.text}')
+                return {'error': f'Failed to finalise upload: {finalize_upload_response.status_code} - {finalize_upload_response.text}'}, finalize_upload_response.status_code
+
+            log_submission(project_id, submission_id, request.user.get('user_id'), finalize_upload_response.status_code, 'Upload finalised successfully')
+            return finalize_upload_response.json(), 200
+
+        except Exception as e:
+            log_submission(project_id, submission_id, request.user.get('user_id'), 500, f'Failed to finalise upload: {str(e)}')
+            return {'error': f'Failed to finalise upload: {str(e)}'}, 500
+        
+
+@project_ns.route('/<string:project_id>/submissions/<string:submission_id>/publish')
+class PublishSubmission(Resource):
+
+    ### POST /projects/<project_id>/submissions/<submission_id>/publish ###
+
+    @api.doc('publish_submission')
+    @require_auth(keycloak_auth)
+    @require_permission('publish_submission', resource_type='project', resource_id_arg='project_id')
+    def post(self, project_id, submission_id):
+
+        """Publish a submission in SONG (proxy endpoint)"""
+
+        try:
+
+            # get the study_id and analysis_id from the submission record
+            with get_db_cursor() as cursor:
+                cursor.execute("""
+                    SELECT study_id, analysis_id
+                    FROM submissions
+                    WHERE id = %s AND project_id = %s
+                """, (submission_id, project_id))
+                
+                submission = cursor.fetchone()
+                
+                if not submission:
+                    return {'error': 'Submission not found for this project'}, 404
+                
+                study_id = submission.get('study_id')
+                analysis_id = submission.get('analysis_id')
+
+
+            # Get client token for SONG API
+            song_token = keycloak_auth.get_client_token()
+            if not song_token:
+                return {'error': 'Failed to authenticate with SONG service'}, 500
+
+            # Set up headers for SONG request
+            song_headers = {
+                'Authorization': f'Bearer {song_token}',
+                'Content-Type': 'application/json'
+            }
+
+            # Forward the publish request to SONG
+            song_publish_url = f"{song}/studies/{study_id}/analysis/publish/{analysis_id}"
+            song_response = requests.put(song_publish_url, headers=song_headers)
+
+            print(f"SONG publish response status: {song_response.status_code}")
+
+            # Forward SONG's response directly
+            try:
+                response_data = song_response.json()
+            except Exception:
+                response_data = {'message': song_response.text}
+
+            if song_response.status_code != 200:
+                log_submission(project_id, submission_id, request.user.get('user_id'), song_response.status_code, f'Failed to publish analysis: {song_response.status_code} - {song_response.text}')
+            else:
+                log_submission(project_id, submission_id, request.user.get('user_id'), song_response.status_code, 'Analysis published successfully')            
+                
+            return response_data, song_response.status_code
+
+        except Exception as e:
+            log_submission(project_id, submission_id, request.user.get('user_id'), 500, f'Failed to publish analysis: {str(e)}')
+            return {'error': f'Failed to publish analysis: {str(e)}'}, 500
+
+
+@project_ns.route('/<string:project_id>/submissions/<string:submission_id>/unpublish')
+class UnpublishSubmission(Resource):
+
+    ### POST /projects/<project_id>/submissions/<submission_id>/unpublish ###
+
+    @api.doc('unpublish_submission')
+    @require_auth(keycloak_auth)
+    @require_permission('unpublish_submission', resource_type='project', resource_id_arg='project_id')
+    def post(self, project_id, submission_id):
+
+        """Unpublish an analysis in SONG (proxy endpoint)"""
+        
+        try:
+
+            # get the study_id and analysis_id from the submission record
+            with get_db_cursor() as cursor:
+                cursor.execute("""
+                    SELECT study_id, analysis_id
+                    FROM submissions
+                    WHERE id = %s AND project_id = %s
+                """, (submission_id, project_id))
+                
+                submission = cursor.fetchone()
+                
+                if not submission:
+                    return {'error': 'Submission not found for this project'}, 404
+                
+                study_id = submission.get('study_id')
+                analysis_id = submission.get('analysis_id')
+
+
+            # Get client token for SONG API
+            song_token = keycloak_auth.get_client_token()
+            if not song_token:
+                return {'error': 'Failed to authenticate with SONG service'}, 500
+
+            # Set up headers for SONG request
+            song_headers = {
+                'Authorization': f'Bearer {song_token}',
+                'Content-Type': 'application/json'
+            }
+
+            # Forward the unpublish request to SONG
+            song_unpublish_url = f"{song}/studies/{study_id}/analysis/unpublish/{analysis_id}"
+            song_response = requests.put(song_unpublish_url, headers=song_headers)
+
+            print(f"SONG unpublish response status: {song_response.status_code}")
+
+            # Forward SONG's response directly
+            try:
+                response_data = song_response.json()
+            except Exception:
+                response_data = {'message': song_response.text}
+
+            if song_response.status_code != 200:
+                log_submission(project_id, submission_id, request.user.get('user_id'), song_response.status_code, f'Failed to unpublish analysis: {song_response.status_code} - {song_response.text}')
+            else:
+                log_submission(project_id, submission_id, request.user.get('user_id'), song_response.status_code, 'Analysis unpublished successfully')
+
+            return response_data, song_response.status_code
+
+        except Exception as e:
+            log_submission(project_id, submission_id, request.user.get('user_id'), 500, f'Failed to unpublish analysis: {str(e)}')
+            return {'error': f'Failed to unpublish analysis: {str(e)}'}, 500
+        
+
 
 
 
@@ -1571,121 +2056,6 @@ class StudyList(Resource):
                 return {'error': f'Study with name "{name}" already exists'}, 409
             return {'error': f'Database error: {str(e)}'}, 500
 
-@study_ns.route('/submit/<string:project_id>/<string:study_id>/')
-class SongSubmit(Resource):
-    
-    ### POST /studies/submit/<project_id>/<study_id>/ ###
-
-    @study_ns.doc('submit_study')
-    @require_auth(keycloak_auth)
-    @require_permission('upload_analysis', resource_type='project', resource_id_arg='project_id')
-    def post(self, project_id, study_id):
-
-        """Submit an analysis to SONG (proxy endpoint)
-        
-        Accepts either:
-        1. JSON data directly in request body
-        2. TSV file upload with JSON metadata containing files array
-        """
-        
-        try:
-            data = None
-            
-            # Check if this is a file upload (multipart/form-data)
-            if request.files and 'file' in request.files:
-                file = request.files['file']
-                
-                if file.filename == '':
-                    return {'error': 'No file selected'}, 400
-                
-                # Check if it's a TSV file
-                if not file.filename.lower().endswith(('.tsv', '.txt')):
-                    return {'error': 'File must be a TSV file (.tsv or .txt)'}, 400
-                
-                try:
-                    # Read and convert TSV to JSON
-                    file_content = file.read().decode('utf-8')
-                    
-                    samples_data = tsv_to_json(file_content)
-                    
-                    
-                    # Get the metadata from form data (files array should be in 'metadata' field)
-                    metadata_json = request.form.get('metadata')
-                    
-                    
-                    if not metadata_json:
-                        return {'error': 'Metadata with files array required when uploading TSV'}, 400
-                    
-                    try:
-                        metadata = json.loads(metadata_json)
-                    except json.JSONDecodeError as e:
-                        return {'error': f'Invalid JSON in metadata field: {str(e)}'}, 400
-                    
-                    # Validate that files array exists in metadata
-                    if 'files' not in metadata:
-                        return {'error': 'files array required in metadata'}, 400
-                    
-                    # Build the complete payload
-                    data = {
-                        "studyId": study_id,
-                        "analysisType": {
-                            "name": "one_to_many_schema",
-                            "version": 1
-                        },
-                        "files": metadata['files'],
-                        "samples": samples_data
-                    }
-                    
-                    print(f"Final payload structure: studyId={data['studyId']}, samples_count={len(data['samples'])}, files_count={len(data['files'])}")
-                    
-                except UnicodeDecodeError:
-                    return {'error': 'File must be UTF-8 encoded'}, 400
-                except Exception as e:
-                    print(f"Error processing TSV: {str(e)}")
-                    return {'error': f'Failed to process TSV file: {str(e)}'}, 500
-            else:
-                print("No file upload detected, checking for JSON body")
-                # Get JSON data directly from request body
-                data = request.get_json()
-                
-            if not data:
-                return {'error': 'No data provided (either JSON or TSV file with metadata required)'}, 400
-
-            # Get client token for SONG API
-            song_token = keycloak_auth.get_client_token()
-            if not song_token:
-                return {'error': 'Failed to authenticate with SONG service'}, 500
-
-            # Set up headers for SONG request
-            song_headers = {
-                'Authorization': f'Bearer {song_token}',
-                'Content-Type': 'application/json'
-            }
-            
-            # Forward the request to SONG
-            song_submit_url = f"{song}/submit/{study_id}/"
-            song_response = requests.post(song_submit_url, headers=song_headers, json=data)
-
-            print(f"SONG submit response status: {song_response.status_code}")
-            
-            # Forward SONG's response directly
-            try:
-                response_data = song_response.json()
-            except:
-                response_data = {'message': song_response.text}
-
-            if song_response.status_code == 200:
-                analysis_id = response_data.get('analysisId')
-                log_submission(project_id, analysis_id, request.user.get('user_id'), song_response.status_code, 'Submission successful')
-            else:    
-                log_submission(project_id, None, request.user.get('user_id'), song_response.status_code, song_response.text)
-
-            return response_data, song_response.status_code
-
-        except Exception as e:
-            log_submission(project_id, None, request.user.get('user_id'), 500, str(e))
-            return {'error': f'Failed to submit analysis: {str(e)}'}, 500
-        
 @study_ns.route('/<string:study_id>/analysis')
 class StudyAnalysis(Resource):
     
@@ -1872,280 +2242,9 @@ class StudyAnalysisUpload(Resource):
             return {'error': f'Failed to upload file: {str(e)}'}, 500
         
 
-@study_ns.route('/<string:project_id>/<string:study_id>/analysis/<string:analysis_id>/upload/init')
-class StudyAnalysisUploadInit(Resource):
-
-    ### POST /studies/<project_id>/<study_id>/analysis/<analysis_id>/upload/init ###
-
-    @study_ns.doc('init_analysis_upload')
-    @require_auth(keycloak_auth)
-    @require_permission('submit_to_study', resource_type='project', resource_id_arg='project_id')
-    def post(self, project_id, study_id, analysis_id):
-
-        """Initialize upload with SCORE (Step 1 of upload process)"""
-
-        try:
-            data = request.get_json()
-            if not data:
-                return {'error': 'No JSON data provided'}, 400
-
-            object_id = data.get('object_id')
-            file_size = data.get('fileSize')
-            file_md5 = data.get('md5')
-            overwrite = data.get('overwrite', True)
-
-            if not object_id or not file_size or not file_md5:
-                return {'error': 'object_id, fileSize, and md5 are required'}, 400
-
-            # Get client token for SCORE API
-            score_token = keycloak_auth.get_client_token()
-            if not score_token:
-                return {'error': 'Failed to authenticate with SCORE service'}, 500
-
-            score_headers = {
-                'Authorization': f'Bearer {score_token}',
-                'Content-Type': 'application/x-www-form-urlencoded'
-            }
-
-            # Initialize upload with SCORE
-            init_upload_url = f"{score}/upload/{object_id}/uploads"
-            init_data = {
-                'fileSize': file_size,
-                'md5': file_md5,
-                'overwrite': overwrite
-            }
-
-            init_response = requests.post(init_upload_url, headers=score_headers, data=init_data)
-            
-            if init_response.status_code != 200:
-                log_submission(project_id, analysis_id, request.user.get('user_id'), init_response.status_code, f'Failed to initialize upload: {init_response.text}')
-                return {'error': f'Failed to initialize upload: {init_response.status_code} - {init_response.text}'}, init_response.status_code
-
-            log_submission(project_id, analysis_id, request.user.get('user_id'), init_response.status_code, 'Upload initialized successfully')
-            return init_response.json(), 200
-
-        except Exception as e:
-            log_submission(project_id, analysis_id, request.user.get('user_id'), 500, f'Failed to initialize upload: {str(e)}')
-            return {'error': f'Failed to initialize upload: {str(e)}'}, 500
-
-
-@study_ns.route('/<string:project_id>/<string:study_id>/analysis/<string:analysis_id>/upload/finalise-part')
-class StudyAnalysisUploadFinalisePart(Resource):
-
-    ### POST /studies/<project_id>/<study_id>/analysis/<analysis_id>/upload/finalise-part ###
-
-    @study_ns.doc('finalise_part_upload')
-    @require_auth(keycloak_auth)
-    @require_permission('submit_to_study', resource_type='project', resource_id_arg='project_id')
-    def post(self, project_id, study_id, analysis_id):
-
-        """Finalize part upload with SCORE (Step 3 of upload process)"""
-
-        try:
-            data = request.get_json()
-            if not data:
-                return {'error': 'No JSON data provided'}, 400
-
-            object_id = data.get('object_id')
-            upload_id = data.get('upload_id')
-            etag = data.get('etag')
-            object_md5 = data.get('md5')
-            part_number = data.get('part_number', 1)
-
-            if not all([etag]):
-                return {'error': 'object_id, upload_id, etag, and object_md5 are required'}, 400
-
-            # Get client token for SCORE API
-            score_token = keycloak_auth.get_client_token()
-            if not score_token:
-                return {'error': 'Failed to authenticate with SCORE service'}, 500
-
-            score_json_headers = {
-                'Authorization': f'Bearer {score_token}',
-                'Content-Type': 'application/json'
-            }
-
-            # Finalise part upload
-            finalise_part_url = f"{score}/upload/{object_id}/parts"
-            finalise_part_params = {
-                'partNumber': part_number,
-                'etag': etag,
-                'md5': object_md5,
-                'uploadId': upload_id
-            }
-            
-            finalise_part_response = requests.post(
-                finalise_part_url, 
-                headers=score_json_headers, 
-                params=finalise_part_params
-            )
-
-            if finalise_part_response.status_code != 200:
-                log_submission(project_id, analysis_id, request.user.get('user_id'), finalise_part_response.status_code, f'Failed to finalise part upload: {finalise_part_response.status_code} - {finalise_part_response.text}')
-                return {'error': f'Failed to finalise part upload: {finalise_part_response.status_code} - {finalise_part_response.text}'}, finalise_part_response.status_code
-
-            log_submission(project_id, analysis_id, request.user.get('user_id'), finalise_part_response.status_code, 'Part upload finalised successfully')
-
-        except Exception as e:
-            log_submission(project_id, analysis_id, request.user.get('user_id'), 500, f'Failed to finalise part upload: {str(e)}')
-            return {'error': f'Failed to finalise part upload: {str(e)}'}, 500
-
-
-@study_ns.route('/<string:project_id>/<string:study_id>/analysis/<string:analysis_id>/upload/finalise')
-class StudyAnalysisUploadFinalise(Resource):
-
-    ### POST /studies/<project_id>/<study_id>/analysis/<analysis_id>/upload/finalise ###
-
-    @study_ns.doc('finalize_upload')
-    @require_auth(keycloak_auth)
-    @require_permission('submit_to_study', resource_type='project', resource_id_arg='project_id')
-    def post(self, project_id, study_id, analysis_id):
-
-        """Finalize complete upload with SCORE (Step 4 of upload process)"""
-
-        try:
-            data = request.get_json()
-            if not data:
-                return {'error': 'No JSON data provided'}, 400
-
-            object_id = data.get('object_id')
-            upload_id = data.get('upload_id')
-
-            if not object_id or not upload_id:
-                return {'error': 'object_id and upload_id are required'}, 400
-
-            # Get client token for SCORE API
-            score_token = keycloak_auth.get_client_token()
-            if not score_token:
-                return {'error': 'Failed to authenticate with SCORE service'}, 500
-
-            score_json_headers = {
-                'Authorization': f'Bearer {score_token}',
-                'Content-Type': 'application/json'
-            }
-
-            # Finalize complete upload
-            finalize_upload_url = f"{score}/upload/{object_id}"
-            finalize_upload_params = {'uploadId': upload_id}
-            
-            finalize_upload_response = requests.post(
-                finalize_upload_url, 
-                headers=score_json_headers, 
-                params=finalize_upload_params
-            )
-            
-            if finalize_upload_response.status_code != 200:
-                log_submission(project_id, analysis_id, request.user.get('user_id'), finalize_upload_response.status_code, f'Failed to finalise upload: {finalize_upload_response.status_code} - {finalize_upload_response.text}')
-                return {'error': f'Failed to finalise upload: {finalize_upload_response.status_code} - {finalize_upload_response.text}'}, finalize_upload_response.status_code
-
-            log_submission(project_id, analysis_id, request.user.get('user_id'), finalize_upload_response.status_code, 'Upload finalised successfully')
-            return {
-                'message': 'Upload finalised successfully',
-                'object_id': object_id,
-                'upload_id': upload_id,
-                'project_id': project_id,
-                'study_id': study_id,
-                'analysis_id': analysis_id
-            }, 200
-
-        except Exception as e:
-            log_submission(project_id, analysis_id, request.user.get('user_id'), 500, f'Failed to finalise upload: {str(e)}')
-            return {'error': f'Failed to finalise upload: {str(e)}'}, 500
-
-
-
-       
-@study_ns.route('/<string:study_id>/analysis/publish/<string:analysis_id>')
-class StudyAnalysisPublish(Resource):
-
-    ### POST /studies/<study_id>/analysis/publish/<analysis_id> ###
-
-    @study_ns.doc('publish_analysis')
-    @require_auth(keycloak_auth)
-    def post(self, study_id, analysis_id):
-
-        """Publish an analysis in SONG (proxy endpoint)"""
-        
-        try:
-            # Get client token for SONG API
-            song_token = keycloak_auth.get_client_token()
-            if not song_token:
-                return {'error': 'Failed to authenticate with SONG service'}, 500
-
-            # Set up headers for SONG request
-            song_headers = {
-                'Authorization': f'Bearer {song_token}',
-                'Content-Type': 'application/json'
-            }
-
-            # Forward the publish request to SONG
-            song_publish_url = f"{song}/studies/{study_id}/analysis/publish/{analysis_id}"
-            song_response = requests.put(song_publish_url, headers=song_headers)
-
-            print(f"SONG publish response status: {song_response.status_code}")
-
-            # Forward SONG's response directly
-            try:
-                response_data = song_response.json()
-            except Exception:
-                response_data = {'message': song_response.text}
-                
-            return response_data, song_response.status_code
-
-        except Exception as e:
-            return {'error': f'Failed to publish analysis: {str(e)}'}, 500
-
-
-@study_ns.route('/<string:study_id>/analysis/unpublish/<string:analysis_id>/')
-class StudyAnalysisUnpublish(Resource):
-    
-    ### POST /studies/<study_id>/analysis/unpublish/<analysis_id> ###
-
-    @study_ns.doc('unpublish_analysis')
-    @require_auth(keycloak_auth)
-    def post(self, study_id, analysis_id):
-
-        """Unpublish an analysis in SONG (proxy endpoint)"""
-        
-        try:
-            # Get client token for SONG API
-            song_token = keycloak_auth.get_client_token()
-            if not song_token:
-                return {'error': 'Failed to authenticate with SONG service'}, 500
-
-            # Set up headers for SONG request
-            song_headers = {
-                'Authorization': f'Bearer {song_token}',
-                'Content-Type': 'application/json'
-            }
-
-            # Forward the unpublish request to SONG
-            song_unpublish_url = f"{song}/studies/{study_id}/analysis/unpublish/{analysis_id}"
-            song_response = requests.put(song_unpublish_url, headers=song_headers)
-
-            print(f"SONG unpublish response status: {song_response.status_code}")
-
-            # Forward SONG's response directly
-            try:
-                response_data = song_response.json()
-            except Exception:
-                response_data = {'message': song_response.text}
-
-            log_event("analysis_unpublish", None, "USER [{}] unpublished ANALYSIS [{}] in STUDY [{}]".format(request.user.get('user_id'), analysis_id, study_id))
-            return response_data, song_response.status_code
-
-        except Exception as e:
-            log_event("analysis_unpublish", None, "USER [{}] failed to unpublish ANALYSIS [{}] in STUDY [{}]. ERROR: {}".format(request.user.get('user_id'), analysis_id, study_id, str(e)))
-            return {'error': f'Failed to unpublish analysis: {str(e)}'}, 500
-        
-
-
-
-
-
 
 ##########################
-### Invites
+### INVITES
 ##########################
 
 invite_ns = api.namespace('invites', description='Invite management endpoints')
