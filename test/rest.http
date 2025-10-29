@@ -1,10 +1,10 @@
-@folio = http://localhost:5000
-# @folio = https://folio-staging.openup.org.za
-@keycloak = http://keycloak.local
-# @keycloak = https://keycloak-staging.openup.org.za
+# @folio = http://localhost:5000
+@folio = https://folio-staging.openup.org.za
+# @keycloak = http://keycloak.local
+@keycloak = https://keycloak-staging.openup.org.za
 
-@song = http://song.local
-# @song = https://song-staging.openup.org.za
+# @song = http://song.local
+@song = https://song-staging.openup.org.za
 
 
 # @minio = http://minio.local
@@ -247,7 +247,7 @@ Content-Type: application/json
 
 ###
 
-@pathogen_id = 0392eece-ebfe-4a52-ae33-d400d556cd47
+@pathogen_id = 6d2494af-a5e5-4965-8494-ad618ba844db
 
 # @name get_pathogen
 GET {{folio}}/pathogens/{{pathogen_id}}
@@ -329,7 +329,7 @@ Content-Type: application/json
 
 ###
 
-@project_id = 1cea44fb-c8ef-4e63-a1ed-1fcd9567bb60
+@project_id = 2bc307f3-22a7-4b61-b97d-cfff86d61b31
 
 ### @name get_project
 GET {{folio}}/projects/{{project_id}}
@@ -403,8 +403,8 @@ Authorization: Bearer {{token}}
 
 ###
 
-@study_id = cholera-002
-@study_folio_id = d9199d30-5966-4a87-ba74-0384d0a03a84
+@study_id = cholera-999
+@study_folio_id = 73feb9b9-915b-41c2-bb4a-908ed10668e8
 
 # @name create_study
 POST {{folio}}/studies/
@@ -427,14 +427,14 @@ Content-Type: application/json
 ##########################
 
 # @name get_studies_in_song
-GET http://song.local/studies/all
+GET {{song}}/studies/all
 Authorization: Bearer {{token}}
 
 
 ###
 
 # @name get_study_in_song
-GET http://song.local/studies/{{study_id}}
+GET {{song}}/studies/{{study_id}}
 Authorization: Bearer {{token}}
 
 ###
@@ -457,23 +457,18 @@ Authorization: Bearer {{token}}
 Content-Type: multipart/form-data; boundary=----WebKitFormBoundary123
 
 ------WebKitFormBoundary123
-Content-Disposition: form-data; name="submissionName"
-Content-Type: text/plain
-
-Cholera TSV Submission
-
-------WebKitFormBoundary123
-Content-Disposition: form-data; name="studyId"
-Content-Type: text/plain
-
-{{study_id}}
-------WebKitFormBoundary123
 Content-Disposition: form-data; name="metadata"
 
 {
+  "studyId": "{{study_id}}",
+  "analysisType": {
+    "name": "cholera_schema",
+    "version": 4
+  },
+  "submissionName": "Cholera TSV Submission",
   "files": [
     {
-      "fileName": "cholera1.fasta",
+      "fileName": "cholera2.fasta",
       "fileType": "FASTA",
       "fileSize": 6643,
       "fileMd5sum": "1dfd8800948e9f2bf44942003f9265fm",
@@ -493,7 +488,7 @@ Content-Type: text/plain
 
 ###
 
-@submission_id = fd488e0a-f78a-4cd9-aa45-683052952a28
+@submission_id = 8c296739-c9a4-40cb-88dd-8df6e7d79a64
 
 # @name getSubmissionDetails
 GET {{folio}}/projects/{{project_id}}/submissions/{{submission_id}}
@@ -501,7 +496,7 @@ Authorization: Bearer {{token}}
 
 ###
 
-@object_id = f45693cb-518d-5952-8e02-751553176d54
+@object_id = 6b7d617a-3a3f-5941-86bc-b16236587de9
 
 # @name upload_init
 POST {{folio}}/projects/{{project_id}}/submissions/{{submission_id}}/upload/init
@@ -511,19 +506,19 @@ Content-Type: application/json
 {
     "object_id": "{{object_id}}",
     "overwrite": true,
-    "fileSize": 3107448,
-    "md5": "be4d1f491dy7a9r4a6bf6f325c71b602"
+    "fileSize": 6643,
+    "md5": "1dfd8800948e9f2bf44942003f9265fm"
 }
 
 ###
 
 # @name upload_file_to_minio
 
-@url = http://localhost:9000/object/data/7ecdaca1-897d-59c2-ab54-8ff17ab2c0ad?uploadId=NTVlNGQ0ZTktMDA4NC00MDEyLTkyMjEtM2VjMDkwNWFjYzViLmRiM2EwMDViLWI0OWEtNGJlNi04Mjk5LWM5MTM3ODVkMTJkNg&partNumber=1&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20251027T175536Z&X-Amz-SignedHeaders=host&X-Amz-Expires=518400&X-Amz-Credential=admin%2F20251027%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Signature=cfa40b915f7408dc931de9c4ee8b7a70f90513daf2b94a39a4b8cfd2f5b28701
+@url = https://minio-staging.openup.org.za/object/data/6b7d617a-3a3f-5941-86bc-b16236587de9?uploadId=Mjc1Njc3MDktNmZiNS00MTczLWEwOTEtOGQ5Njg4Y2YzZDg5LjJjZWRjZDRjLTIxYjItNDM5ZS1hMWNmLTc5N2ViYjE0NTYwNQ&partNumber=1&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20251029T185142Z&X-Amz-SignedHeaders=host&X-Amz-Expires=518399&X-Amz-Credential=admin%2F20251029%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Signature=7123f153aec588fb70259da7b79f4d80287dcdc178ebf7ee223cca080db4892f
 PUT {{url}}
 Content-Type: application/octet-stream
 
-< /media/dimee/Work/OpenUp/SANBI/agari-folio/test/LS997867.1 Vibrio cholerae strain NCTC 30 genome assembly, chromosome 1.fasta
+< /home/dimee/Work/OpenUp/SANBI/agari-folio/test/cholera2.fasta
 
 
 ###
@@ -535,9 +530,9 @@ Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-  "object_id": "7ecdaca1-897d-59c2-ab54-8ff17ab2c0ad",
-  "upload_id": "NTVlNGQ0ZTktMDA4NC00MDEyLTkyMjEtM2VjMDkwNWFjYzViLmY0ZmUzZTQ2LTNhNDctNGJkMS04Y2MyLTY3MGFiZTczZjQwZg",
-  "etag": "a8e97c902dc66f7dd800d38555c7c291",
+  "object_id": "{{object_id}}",
+  "upload_id": "Mjc1Njc3MDktNmZiNS00MTczLWEwOTEtOGQ5Njg4Y2YzZDg5LjhhMjJhZWM4LWExOGItNGI5ZC1hZjRkLTZmYWFjZTNhZjBjNw",
+  "etag": "bda8ea08a3e76e699a0248038737649d",
   "part_number": 1,
   "md5": "be4d1f491dy7a9r4a6bf6f325c71b602"
 }
@@ -551,11 +546,11 @@ Content-Type: application/json
 
 {
   "object_id": "7ecdaca1-897d-59c2-ab54-8ff17ab2c0ad",
-  "upload_id": "NTVlNGQ0ZTktMDA4NC00MDEyLTkyMjEtM2VjMDkwNWFjYzViLmY0ZmUzZTQ2LTNhNDctNGJkMS04Y2MyLTY3MGFiZTczZjQwZg",
+  "upload_id": "Mjc1Njc3MDktNmZiNS00MTczLWEwOTEtOGQ5Njg4Y2YzZDg5LjhhMjJhZWM4LWExOGItNGI5ZC1hZjRkLTZmYWFjZTNhZjBjNw",
   "parts": [
     {
       "part_number": 1,
-      "etag": "a8e97c902dc66f7dd800d38555c7c291"
+      "etag": "bda8ea08a3e76e699a0248038737649d"
     }
   ]
 }
