@@ -1745,14 +1745,14 @@ class ProjectSubmissionUploadFinalisePart(Resource):
             )
 
             if finalise_part_response.status_code != 200:
-                log_submission(project_id, submission_id, request.user.get('user_id'), finalise_part_response.status_code, f'Failed to finalise part upload: {finalise_part_response.status_code} - {finalise_part_response.text}')
+                log_submission(submission_id, request.user.get('user_id'), finalise_part_response.status_code, finalise_part_response.text)
                 return {'error': f'Failed to finalise part upload: {finalise_part_response.status_code} - {finalise_part_response.text}'}, finalise_part_response.status_code
 
-            log_submission(project_id, submission_id, request.user.get('user_id'), finalise_part_response.status_code, 'Part upload finalised successfully')
+            log_submission(submission_id, request.user.get('user_id'), finalise_part_response.status_code, 'Part upload finalised successfully')
             return finalise_part_response.json(), 200
 
         except Exception as e:
-            log_submission(project_id, submission_id, request.user.get('user_id'), 500, f'Failed to finalise part upload: {str(e)}')
+            log_submission(submission_id, request.user.get('user_id'), 500, f'{str(e)}')
             return {'error': f'Failed to finalise part upload: {str(e)}'}, 500
 
 
@@ -1800,14 +1800,14 @@ class ProjectSubmissionUploadFinalise(Resource):
             )
             
             if finalize_upload_response.status_code != 200:
-                log_submission(project_id, submission_id, request.user.get('user_id'), finalize_upload_response.status_code, f'Failed to finalise upload: {finalize_upload_response.status_code} - {finalize_upload_response.text}')
+                log_submission(submission_id, request.user.get('user_id'), finalize_upload_response.status_code, finalize_upload_response.text)
                 return {'error': f'Failed to finalise upload: {finalize_upload_response.status_code} - {finalize_upload_response.text}'}, finalize_upload_response.status_code
 
-            log_submission(project_id, submission_id, request.user.get('user_id'), finalize_upload_response.status_code, 'Upload finalised successfully')
+            log_submission(submission_id, request.user.get('user_id'), finalize_upload_response.status_code, 'Upload finalised successfully')
             return finalize_upload_response.json(), 200
 
         except Exception as e:
-            log_submission(project_id, submission_id, request.user.get('user_id'), 500, f'Failed to finalise upload: {str(e)}')
+            log_submission(submission_id, request.user.get('user_id'), 500, f'{str(e)}')
             return {'error': f'Failed to finalise upload: {str(e)}'}, 500
         
 
@@ -1866,14 +1866,14 @@ class PublishSubmission(Resource):
                 response_data = {'message': song_response.text}
 
             if song_response.status_code != 200:
-                log_submission(project_id, submission_id, request.user.get('user_id'), song_response.status_code, f'Failed to publish analysis: {song_response.status_code} - {song_response.text}')
+                log_submission(submission_id, request.user.get('user_id'), song_response.status_code, song_response.text)
             else:
-                log_submission(project_id, submission_id, request.user.get('user_id'), song_response.status_code, 'Analysis published successfully')            
+                log_submission(submission_id, request.user.get('user_id'), song_response.status_code, 'Analysis published successfully')            
                 
             return response_data, song_response.status_code
 
         except Exception as e:
-            log_submission(project_id, submission_id, request.user.get('user_id'), 500, f'Failed to publish analysis: {str(e)}')
+            log_submission(submission_id, request.user.get('user_id'), 500, f'{str(e)}')
             return {'error': f'Failed to publish analysis: {str(e)}'}, 500
 
 
@@ -1932,14 +1932,14 @@ class UnpublishSubmission(Resource):
                 response_data = {'message': song_response.text}
 
             if song_response.status_code != 200:
-                log_submission(project_id, submission_id, request.user.get('user_id'), song_response.status_code, f'Failed to unpublish analysis: {song_response.status_code} - {song_response.text}')
+                log_submission(submission_id, request.user.get('user_id'), song_response.status_code, song_response.text)
             else:
-                log_submission(project_id, submission_id, request.user.get('user_id'), song_response.status_code, 'Analysis unpublished successfully')
+                log_submission(submission_id, request.user.get('user_id'), song_response.status_code, 'Analysis unpublished successfully')
 
             return response_data, song_response.status_code
 
         except Exception as e:
-            log_submission(project_id, submission_id, request.user.get('user_id'), 500, f'Failed to unpublish analysis: {str(e)}')
+            log_submission(submission_id, request.user.get('user_id'), 500, f'{str(e)}')
             return {'error': f'Failed to unpublish analysis: {str(e)}'}, 500
         
 
