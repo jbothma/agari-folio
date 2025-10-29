@@ -2292,9 +2292,9 @@ class ProjectUserConfirm(Resource):
         keycloak_auth.remove_attribute_value(user_id, 'invite_role', invite_role)
 
         # Get access token for the user
-        access_token = keycloak_auth.get_user_access_token(user_id)
-        if not access_token:
-            return {'error': f'"Failed to obtain access token for user {user_id}'}, 500
+        auth_tokens = keycloak_auth.get_user_auth_tokens(user_id)
+        if not auth_tokens:
+            return {'error': f'"Failed to obtain auth tokens for user {user_id}'}, 500
 
         return {
             'message': 'User added to project successfully',
@@ -2302,7 +2302,8 @@ class ProjectUserConfirm(Resource):
             'project_id': invite_project_id,
             'new_role': invite_role,
             'removed_roles': removed_roles,
-            'access_token': access_token
+            'access_token': auth_tokens["access_token"],
+            'refresh_token': auth_tokens["refresh_token"]
         }, 200
 
 
@@ -2333,8 +2334,8 @@ class OrganisationUserConfirm(Resource):
         keycloak_auth.remove_attribute_value(user_id, 'invite_org_role', invite_org_role)
 
         # Get access token for the user
-        access_token = keycloak_auth.get_user_access_token(user_id)
-        if not access_token:
+        auth_tokens = keycloak_auth.get_user_auth_tokens(user_id)
+        if not auth_tokens:
             return {'error': f'"Failed to obtain access token for user {user_id}'}, 500
 
         if result.get('success'):
