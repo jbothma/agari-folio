@@ -1770,7 +1770,15 @@ class ProjectSubmissionUploadFinalisePart(Resource):
                 return {'error': f'Failed to finalise part upload: {finalise_part_response.status_code} - {finalise_part_response.text}'}, finalise_part_response.status_code
 
             log_submission(submission_id, request.user.get('user_id'), finalise_part_response.status_code, 'Part upload finalised successfully')
-            return finalise_part_response.json(), 200
+            
+            
+            return {
+                'message': 'Part upload finalized successfully',
+                'object_id': object_id,
+                'upload_id': upload_id,
+                'part_number': part_number,
+                'etag': etag
+            }, 200
 
         except Exception as e:
             log_submission(submission_id, request.user.get('user_id'), 500, f'{str(e)}')
@@ -1796,9 +1804,14 @@ class ProjectSubmissionUploadFinalise(Resource):
 
             object_id = data.get('object_id')
             upload_id = data.get('upload_id')
+            parts = data.get('parts', [])  
 
             if not object_id or not upload_id:
                 return {'error': 'object_id and upload_id are required'}, 400
+
+            # Validate parts data if provided
+            if parts and not isinstance(parts, list):
+                return {'error': 'parts must be an array'}, 400
 
             # Get client token for SCORE API
             score_token = keycloak_auth.get_client_token()
@@ -1814,18 +1827,43 @@ class ProjectSubmissionUploadFinalise(Resource):
             finalize_upload_url = f"{score}/upload/{object_id}"
             finalize_upload_params = {'uploadId': upload_id}
             
-            finalize_upload_response = requests.post(
-                finalize_upload_url, 
-                headers=score_json_headers, 
-                params=finalize_upload_params
-            )
+            # Include parts data in the request body if provided
+            request_body = {}
+            if parts:
+                request_body['parts'] = parts
+            
+            if request_body:
+                finalize_upload_response = requests.post(
+                    finalize_upload_url, 
+                    headers=score_json_headers, 
+                    params=finalize_upload_params,
+                    json=request_body 
+                )
+            else:
+                finalize_upload_response = requests.post(
+                    finalize_upload_url, 
+                    headers=score_json_headers, 
+                    params=finalize_upload_params
+                )
             
             if finalize_upload_response.status_code != 200:
                 log_submission(submission_id, request.user.get('user_id'), finalize_upload_response.status_code, finalize_upload_response.text)
                 return {'error': f'Failed to finalise upload: {finalize_upload_response.status_code} - {finalize_upload_response.text}'}, finalize_upload_response.status_code
 
             log_submission(submission_id, request.user.get('user_id'), finalize_upload_response.status_code, 'Upload finalised successfully')
-            return finalize_upload_response.json(), 200
+            
+            # SCORE might return empty response, so handle that
+            try:
+                response_data = finalize_upload_response.json()
+            except:
+                # If no JSON response, return success message
+                response_data = {
+                    'message': 'Upload finalized successfully',
+                    'object_id': object_id,
+                    'upload_id': upload_id
+                }
+                
+            return response_data, 200
 
         except Exception as e:
             log_submission(submission_id, request.user.get('user_id'), 500, f'{str(e)}')
