@@ -1478,21 +1478,24 @@ class ProjectSubmissions(Resource):
                     
                     metadata_json = request.form.get('metadata')
 
-                    study_id = request.form.get('studyId')
-
-                    submission_name = request.form.get('submissionName', 'TSV Upload Submission')
-
                     if not metadata_json:
                         return {'error': 'Metadata with files array is required when uploading TSV'}, 400
-                    
-                    if not study_id:
-                        return {'error': 'studyId is required when uploading TSV'}, 400
-
-                    if not submission_name:
-                        return {'error': 'submissionName is required when uploading TSV'}, 400
 
                     try:
                         metadata = json.loads(metadata_json)
+
+                        if 'studyId' not in metadata:
+                            return {'error': 'studyId is required in metadata'}, 400
+                        
+                        if 'analysisType' not in metadata:
+                            return {'error': 'analysisType is required in metadata'}, 400
+
+                        if 'files' not in metadata:
+                            return {'error': 'files array is required in metadata'}, 400
+
+                        if 'submissionName' not in metadata:
+                            return {'error': 'submissionName is required in metadata'}, 400
+
                     except json.JSONDecodeError as e:
                         return {'error': f'Invalid JSON in metadata field: {str(e)}'}, 400
                     
@@ -1502,11 +1505,8 @@ class ProjectSubmissions(Resource):
                     
                     # Build the complete payload
                     data = {
-                        "studyId": study_id,
-                        "analysisType": {
-                            "name": "one_to_many_schema",
-                            "version": 1
-                        },
+                        "studyId": metadata['studyId'],
+                        "analysisType": metadata['analysisType'],
                         "files": metadata['files'],
                         "samples": samples_data
                     }
@@ -1538,7 +1538,7 @@ class ProjectSubmissions(Resource):
             }
             
             # Forward the request to SONG
-            song_submit_url = f"{song}/submit/{study_id}/"
+            song_submit_url = f"{song}/submit/{metadata['studyId']}/"
             song_response = requests.post(song_submit_url, headers=song_headers, json=data)
 
             print(f"SONG submit response status: {song_response.status_code}")
@@ -1559,11 +1559,11 @@ class ProjectSubmissions(Resource):
                     INSERT INTO submissions (project_id, study_id, analysis_id, submission_name)
                     VALUES (%s, %s, %s, %s)
                     RETURNING id
-                """, (project_id, study_id, analysis_id, submission_name))
+                """, (project_id, metadata['studyId'], analysis_id, metadata.get('submissionName')))
                 
                 submission_id = cursor.fetchone()['id']
 
-                log_submission(submission_id, request.user.get('user_id'), song_response.status_code, 'Submission forwarded to SONG')
+                log_submission(submission_id, request.user.get('user_id'), song_response.status_code, song_response.text)
 
             return response_data, song_response.status_code
 
