@@ -236,7 +236,7 @@ def log_event(log_type, resource_id, log_entry):
         return False
 
 
-def log_submission(project_id, analysis_id, user_id, status, message):
+def log_submission(submission_id, user_id, status, message):
     try:
         with get_db_cursor() as cursor:
             cursor.execute(

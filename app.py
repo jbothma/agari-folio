@@ -23,6 +23,7 @@ from helpers import (
     log_submission,
     tsv_to_json,
 )
+import uuid
 
 
 # Custom JSON encoder to handle datetime and other types
@@ -1433,7 +1434,7 @@ class ProjectSubmissions(Resource):
     def get(self, project_id):
 
         """List all submissions associated with a project"""
-    
+
         try:
             with get_db_cursor() as cursor:
                 cursor.execute("""
@@ -1444,6 +1445,17 @@ class ProjectSubmissions(Resource):
                 """, (project_id,))
                 
                 submissions = cursor.fetchall()
+                
+                # Get logs for each submission
+                for submission in submissions:
+                    cursor.execute("""
+                        SELECT *
+                        FROM submissions_log
+                        WHERE submission_id = %s
+                        ORDER BY created_at DESC
+                    """, (submission['id'],))
+                    
+                    submission['logs'] = cursor.fetchall()
                 
                 return {
                     'project_id': project_id,
@@ -1491,21 +1503,24 @@ class ProjectSubmissions(Resource):
                     
                     metadata_json = request.form.get('metadata')
 
-                    study_id = request.form.get('studyId')
-
-                    submission_name = request.form.get('submissionName', 'TSV Upload Submission')
-
                     if not metadata_json:
                         return {'error': 'Metadata with files array is required when uploading TSV'}, 400
-                    
-                    if not study_id:
-                        return {'error': 'studyId is required when uploading TSV'}, 400
-
-                    if not submission_name:
-                        return {'error': 'submissionName is required when uploading TSV'}, 400
 
                     try:
                         metadata = json.loads(metadata_json)
+
+                        if 'studyId' not in metadata:
+                            return {'error': 'studyId is required in metadata'}, 400
+                        
+                        if 'analysisType' not in metadata:
+                            return {'error': 'analysisType is required in metadata'}, 400
+
+                        if 'files' not in metadata:
+                            return {'error': 'files array is required in metadata'}, 400
+
+                        if 'submissionName' not in metadata:
+                            return {'error': 'submissionName is required in metadata'}, 400
+
                     except json.JSONDecodeError as e:
                         return {'error': f'Invalid JSON in metadata field: {str(e)}'}, 400
                     
@@ -1515,11 +1530,8 @@ class ProjectSubmissions(Resource):
                     
                     # Build the complete payload
                     data = {
-                        "studyId": study_id,
-                        "analysisType": {
-                            "name": "one_to_many_schema",
-                            "version": 1
-                        },
+                        "studyId": metadata['studyId'],
+                        "analysisType": metadata['analysisType'],
                         "files": metadata['files'],
                         "samples": samples_data
                     }
@@ -1551,7 +1563,7 @@ class ProjectSubmissions(Resource):
             }
             
             # Forward the request to SONG
-            song_submit_url = f"{song}/submit/{study_id}/"
+            song_submit_url = f"{song}/submit/{metadata['studyId']}?allowDuplicates=true"
             song_response = requests.post(song_submit_url, headers=song_headers, json=data)
 
             print(f"SONG submit response status: {song_response.status_code}")
@@ -1572,11 +1584,13 @@ class ProjectSubmissions(Resource):
                     INSERT INTO submissions (project_id, study_id, analysis_id, submission_name)
                     VALUES (%s, %s, %s, %s)
                     RETURNING id
-                """, (project_id, study_id, analysis_id, submission_name))
+                """, (project_id, metadata['studyId'], analysis_id, metadata.get('submissionName')))
                 
                 submission_id = cursor.fetchone()['id']
 
-                log_submission(submission_id, request.user.get('user_id'), song_response.status_code, 'Submission forwarded to SONG')
+                log_submission(submission_id, request.user.get('user_id'), song_response.status_code, song_response.text)
+
+                response_data['submission_id'] = submission_id
 
             return response_data, song_response.status_code
 
@@ -1595,21 +1609,43 @@ class ProjectSubmission(Resource):
     def get(self, project_id, submission_id):
 
         """Get details of a specific submission associated with a project"""
-    
+
         try:
             with get_db_cursor() as cursor:
+                
+                # Clean and validate project_id
+                try:
+                    clean_project_id = str(uuid.UUID(project_id.strip('"')))
+                except ValueError:
+                    return {'error': f'Invalid project_id format: {project_id}'}, 400
+                
+                # Clean and validate submission_id  
+                try:
+                    clean_submission_id = str(uuid.UUID(submission_id.strip('"')))
+                except ValueError:
+                    return {'error': f'Invalid submission_id format: {submission_id}'}, 400
+                
                 cursor.execute("""
                     SELECT s.*
                     FROM submissions s
                     WHERE s.project_id = %s AND s.id = %s
-                """, (project_id, submission_id))
+                """, (clean_project_id, clean_submission_id))
                 
                 submission = cursor.fetchone()
                 
                 if not submission:
                     return {'error': 'Submission not found for this project'}, 404
                 
-
+                # Get logs for this submission
+                cursor.execute("""
+                    SELECT *
+                    FROM submissions_log
+                    WHERE submission_id = %s
+                    ORDER BY created_at DESC
+                """, (clean_submission_id,))
+                
+                submission['logs'] = cursor.fetchall()
+                
                 # get analysis status from SONG
                 analysis_id = submission.get('analysis_id')
                 study_id = submission.get('study_id')
@@ -1631,7 +1667,6 @@ class ProjectSubmission(Resource):
                         song_data = song_response.json()
                         submission['analysis'] = song_data
 
-                
                 return submission
         except Exception as e:
             return {'error': f'Database error: {str(e)}'}, 500
@@ -1745,14 +1780,22 @@ class ProjectSubmissionUploadFinalisePart(Resource):
             )
 
             if finalise_part_response.status_code != 200:
-                log_submission(project_id, submission_id, request.user.get('user_id'), finalise_part_response.status_code, f'Failed to finalise part upload: {finalise_part_response.status_code} - {finalise_part_response.text}')
+                log_submission(submission_id, request.user.get('user_id'), finalise_part_response.status_code, finalise_part_response.text)
                 return {'error': f'Failed to finalise part upload: {finalise_part_response.status_code} - {finalise_part_response.text}'}, finalise_part_response.status_code
 
-            log_submission(project_id, submission_id, request.user.get('user_id'), finalise_part_response.status_code, 'Part upload finalised successfully')
-            return finalise_part_response.json(), 200
+            log_submission(submission_id, request.user.get('user_id'), finalise_part_response.status_code, 'Part upload finalised successfully')
+            
+            
+            return {
+                'message': 'Part upload finalized successfully',
+                'object_id': object_id,
+                'upload_id': upload_id,
+                'part_number': part_number,
+                'etag': etag
+            }, 200
 
         except Exception as e:
-            log_submission(project_id, submission_id, request.user.get('user_id'), 500, f'Failed to finalise part upload: {str(e)}')
+            log_submission(submission_id, request.user.get('user_id'), 500, f'{str(e)}')
             return {'error': f'Failed to finalise part upload: {str(e)}'}, 500
 
 
@@ -1775,9 +1818,14 @@ class ProjectSubmissionUploadFinalise(Resource):
 
             object_id = data.get('object_id')
             upload_id = data.get('upload_id')
+            parts = data.get('parts', [])  
 
             if not object_id or not upload_id:
                 return {'error': 'object_id and upload_id are required'}, 400
+
+            # Validate parts data if provided
+            if parts and not isinstance(parts, list):
+                return {'error': 'parts must be an array'}, 400
 
             # Get client token for SCORE API
             score_token = keycloak_auth.get_client_token()
@@ -1793,21 +1841,46 @@ class ProjectSubmissionUploadFinalise(Resource):
             finalize_upload_url = f"{score}/upload/{object_id}"
             finalize_upload_params = {'uploadId': upload_id}
             
-            finalize_upload_response = requests.post(
-                finalize_upload_url, 
-                headers=score_json_headers, 
-                params=finalize_upload_params
-            )
+            # Include parts data in the request body if provided
+            request_body = {}
+            if parts:
+                request_body['parts'] = parts
+            
+            if request_body:
+                finalize_upload_response = requests.post(
+                    finalize_upload_url, 
+                    headers=score_json_headers, 
+                    params=finalize_upload_params,
+                    json=request_body 
+                )
+            else:
+                finalize_upload_response = requests.post(
+                    finalize_upload_url, 
+                    headers=score_json_headers, 
+                    params=finalize_upload_params
+                )
             
             if finalize_upload_response.status_code != 200:
-                log_submission(project_id, submission_id, request.user.get('user_id'), finalize_upload_response.status_code, f'Failed to finalise upload: {finalize_upload_response.status_code} - {finalize_upload_response.text}')
+                log_submission(submission_id, request.user.get('user_id'), finalize_upload_response.status_code, finalize_upload_response.text)
                 return {'error': f'Failed to finalise upload: {finalize_upload_response.status_code} - {finalize_upload_response.text}'}, finalize_upload_response.status_code
 
-            log_submission(project_id, submission_id, request.user.get('user_id'), finalize_upload_response.status_code, 'Upload finalised successfully')
-            return finalize_upload_response.json(), 200
+            log_submission(submission_id, request.user.get('user_id'), finalize_upload_response.status_code, 'Upload finalised successfully')
+            
+            # SCORE might return empty response, so handle that
+            try:
+                response_data = finalize_upload_response.json()
+            except:
+                # If no JSON response, return success message
+                response_data = {
+                    'message': 'Upload finalized successfully',
+                    'object_id': object_id,
+                    'upload_id': upload_id
+                }
+                
+            return response_data, 200
 
         except Exception as e:
-            log_submission(project_id, submission_id, request.user.get('user_id'), 500, f'Failed to finalise upload: {str(e)}')
+            log_submission(submission_id, request.user.get('user_id'), 500, f'{str(e)}')
             return {'error': f'Failed to finalise upload: {str(e)}'}, 500
         
 
@@ -1824,6 +1897,11 @@ class PublishSubmission(Resource):
         """Publish a submission in SONG (proxy endpoint)"""
 
         try:
+            try:
+                clean_project_id = str(uuid.UUID(project_id.strip('"')))
+                clean_submission_id = str(uuid.UUID(submission_id.strip('"')))
+            except ValueError as e:
+                return {'error': f'Invalid UUID format: {str(e)}'}, 400
 
             # get the study_id and analysis_id from the submission record
             with get_db_cursor() as cursor:
@@ -1831,7 +1909,7 @@ class PublishSubmission(Resource):
                     SELECT study_id, analysis_id
                     FROM submissions
                     WHERE id = %s AND project_id = %s
-                """, (submission_id, project_id))
+                """, (clean_submission_id, clean_project_id))
                 
                 submission = cursor.fetchone()
                 
@@ -1840,7 +1918,6 @@ class PublishSubmission(Resource):
                 
                 study_id = submission.get('study_id')
                 analysis_id = submission.get('analysis_id')
-
 
             # Get client token for SONG API
             song_token = keycloak_auth.get_client_token()
@@ -1866,14 +1943,14 @@ class PublishSubmission(Resource):
                 response_data = {'message': song_response.text}
 
             if song_response.status_code != 200:
-                log_submission(project_id, submission_id, request.user.get('user_id'), song_response.status_code, f'Failed to publish analysis: {song_response.status_code} - {song_response.text}')
+                log_submission(clean_submission_id, request.user.get('user_id'), song_response.status_code, song_response.text)
             else:
-                log_submission(project_id, submission_id, request.user.get('user_id'), song_response.status_code, 'Analysis published successfully')            
+                log_submission(clean_submission_id, request.user.get('user_id'), song_response.status_code, 'Analysis published successfully')            
                 
             return response_data, song_response.status_code
 
         except Exception as e:
-            log_submission(project_id, submission_id, request.user.get('user_id'), 500, f'Failed to publish analysis: {str(e)}')
+            log_submission(submission_id, request.user.get('user_id'), 500, f'{str(e)}')
             return {'error': f'Failed to publish analysis: {str(e)}'}, 500
 
 
@@ -1890,6 +1967,11 @@ class UnpublishSubmission(Resource):
         """Unpublish an analysis in SONG (proxy endpoint)"""
         
         try:
+            try:
+                clean_project_id = str(uuid.UUID(project_id.strip('"')))
+                clean_submission_id = str(uuid.UUID(submission_id.strip('"')))
+            except ValueError as e:
+                return {'error': f'Invalid UUID format: {str(e)}'}, 400
 
             # get the study_id and analysis_id from the submission record
             with get_db_cursor() as cursor:
@@ -1897,7 +1979,7 @@ class UnpublishSubmission(Resource):
                     SELECT study_id, analysis_id
                     FROM submissions
                     WHERE id = %s AND project_id = %s
-                """, (submission_id, project_id))
+                """, (clean_submission_id, clean_project_id))
                 
                 submission = cursor.fetchone()
                 
@@ -1906,7 +1988,6 @@ class UnpublishSubmission(Resource):
                 
                 study_id = submission.get('study_id')
                 analysis_id = submission.get('analysis_id')
-
 
             # Get client token for SONG API
             song_token = keycloak_auth.get_client_token()
@@ -1932,14 +2013,14 @@ class UnpublishSubmission(Resource):
                 response_data = {'message': song_response.text}
 
             if song_response.status_code != 200:
-                log_submission(project_id, submission_id, request.user.get('user_id'), song_response.status_code, f'Failed to unpublish analysis: {song_response.status_code} - {song_response.text}')
+                log_submission(clean_submission_id, request.user.get('user_id'), song_response.status_code, song_response.text)
             else:
-                log_submission(project_id, submission_id, request.user.get('user_id'), song_response.status_code, 'Analysis unpublished successfully')
+                log_submission(clean_submission_id, request.user.get('user_id'), song_response.status_code, 'Analysis unpublished successfully')
 
             return response_data, song_response.status_code
 
         except Exception as e:
-            log_submission(project_id, submission_id, request.user.get('user_id'), 500, f'Failed to unpublish analysis: {str(e)}')
+            log_submission(submission_id, request.user.get('user_id'), 500, f'{str(e)}')
             return {'error': f'Failed to unpublish analysis: {str(e)}'}, 500
         
 
