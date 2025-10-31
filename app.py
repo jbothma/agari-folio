@@ -1060,7 +1060,7 @@ class ProjectList(Resource):
                 """, (name, description, pathogen_id, user_id, organisation_id, privacy))
 
                 new_project = cursor.fetchone()
-                
+
                 return {
                     'message': 'Project created successfully',
                     'project': new_project
@@ -1087,7 +1087,6 @@ class Project(Resource):
         try:
                 
             with get_db_cursor() as cursor:
-                    
                 if organisation_id is not None:
                     cursor.execute("""
                         SELECT *
@@ -1096,15 +1095,15 @@ class Project(Resource):
                         AND (privacy = 'public' OR organisation_id = %s)
                         ORDER BY name
                     """, (project_id, organisation_id))
-                    
                 else:
+                    user_projects = keycloak_auth.get_user_projects()
                     cursor.execute("""
                         SELECT *
                         FROM projects
                         WHERE id = %s AND deleted_at IS NULL
-                        AND (privacy = 'public' OR privacy = 'semi-private')
+                        AND (privacy = 'public' OR privacy = 'semi-private' OR id = ANY(%s::uuid[]))
                         ORDER BY name
-                    """, (project_id,))
+                    """, (project_id, user_projects))
 
                 project = cursor.fetchone()
                 if not project:
