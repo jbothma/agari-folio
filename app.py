@@ -1,6 +1,12 @@
-from flask import Flask,request
+from flask import Flask, request
 from flask_restx import Api, Resource
-from auth import KeycloakAuth, require_auth, extract_user_info, require_permission, user_has_permission
+from auth import (
+    KeycloakAuth,
+    require_auth,
+    extract_user_info,
+    require_permission,
+    user_has_permission,
+)
 from permissions import PERMISSIONS
 from database import get_db_cursor, test_connection
 import os
@@ -8,8 +14,17 @@ import json
 from datetime import datetime, date
 from decimal import Decimal
 import requests
-from helpers import magic_link, invite_user_to_project, invite_user_to_org, access_revoked_notification, log_event, log_submission, tsv_to_json
+from helpers import (
+    magic_link,
+    invite_user_to_project,
+    invite_user_to_org,
+    access_revoked_notification,
+    log_event,
+    log_submission,
+    tsv_to_json,
+)
 import uuid
+
 
 # Custom JSON encoder to handle datetime and other types
 class CustomJSONEncoder(json.JSONEncoder):
@@ -2328,8 +2343,24 @@ class StudyAnalysisUpload(Resource):
 
 invite_ns = api.namespace('invites', description='Invite management endpoints')
 
+
+@invite_ns.route('/project/<string:project_id>/<string:user_id>')
+class ProjectInviteStatus(Resource):
+
+    ### GET /invites/<user_id> ###
+
+    @api.doc('get_project_invites')
+    def get(self, project_id, user_id):
+        user = keycloak_auth.get_user(user_id)
+        if user.get("attributes"):
+            invite = user["attributes"].get(project_id, [""])[0]
+        print(invite)
+
+
+
 @invite_ns.route('/project/<string:token>/accept')
-class ProjectUserConfirm(Resource):
+class ProjectInviteConfirm(Resource):
+
     ### POST /invites/<token>/accept ###
 
     @api.doc('accept_project_invite')
@@ -2350,11 +2381,11 @@ class ProjectUserConfirm(Resource):
         # Remove user from all existing project roles first (role hierarchy enforcement)
         removed_roles = []
         for existing_role in ['project-admin', 'project-contributor', 'project-viewer']:
-            if keycloak_auth.user_has_attribute(user_id, existing_role, project_id):
-                success = keycloak_auth.remove_attribute_value(user_id, existing_role, project_id)
+            if keycloak_auth.user_has_attribute(user_id, existing_role, invite_project_id):
+                success = keycloak_auth.remove_attribute_value(user_id, existing_role, invite_project_id)
                 if success:
                     removed_roles.append(existing_role)
-                    print(f"Removed project_id {project_id} from role {existing_role} for user {user_id}")
+                    print(f"Removed project_id {invite_project_id} from role {existing_role} for user {user_id}")
                 else:
                     return {'error': f'Failed to remove existing role {existing_role}'}, 500
 
@@ -2387,7 +2418,7 @@ class ProjectUserConfirm(Resource):
 
 
 @invite_ns.route('/organisation/<string:token>/accept')
-class OrganisationUserConfirm(Resource):
+class OrganisationInviteConfirm(Resource):
     ### POST /invites/<token>/accept ###
 
     @api.doc('accept_organisation_invite')

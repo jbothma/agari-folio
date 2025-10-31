@@ -38,8 +38,11 @@ def sendgrid_email(to_email, to_name, subject, html_content):
         subject=subject,
         html_content=html_content,
     )
-    response = sg.send(message)
-    return response
+    if sg_api_key != "":
+        response = sg.send(message)
+        return response
+    else:
+        return {'error': 'Email not configured'}, 204
 
 
 def mjml_to_html(template_name):
@@ -114,6 +117,7 @@ def invite_user_to_project(user, redirect_uri, project_id, role):
     to_email = user["email"]
     subject = "You've been invited to AGARI"
 
+    # Get project name
     with get_db_cursor() as cursor:
         cursor.execute(
             """
@@ -138,14 +142,17 @@ def invite_user_to_project(user, redirect_uri, project_id, role):
         html_template, project_name=project["name"], accept_link=accept_link
     )
 
-    response = sendgrid_email(to_email, to_name, subject, html_content)
+    result, status_code = sendgrid_email(to_email, to_name, subject, html_content)
 
-    if response.status_code in [200, 201, 202]:
+    if status_code in [200, 201, 202, 204]:
         # assign temp invite attributes to user
         keycloak_auth.add_attribute_value(user["id"], "invite_token", inv_token)
         keycloak_auth.add_attribute_value(user["id"], "invite_project_id", project_id)
         keycloak_auth.add_attribute_value(user["id"], "invite_role", role)
-        return f"Invitation email sent successfully"
+        if status_code == 204:
+            return f"Email not sent"
+        else:
+            return f"Invitation email sent successfully"
     else:
         return {"error": "Failed to send invitation email"}, 500
 
@@ -184,15 +191,17 @@ def invite_user_to_org(user, redirect_uri, org_id, role):
     html_content = render_template_string(
         html_template, org_name=org["name"], accept_link=accept_link
     )
+    result, status_code = sendgrid_email(to_email, to_name, subject, html_content)
 
-    response = sendgrid_email(to_email, to_name, subject, html_content)
-
-    if response.status_code in [200, 201, 202]:
+    if status_code in [200, 201, 202, 204]:
         # assign temp invite attributes to user
         keycloak_auth.add_attribute_value(user["id"], "invite_org_token", inv_token)
         keycloak_auth.add_attribute_value(user["id"], "invite_org_id", org_id)
         keycloak_auth.add_attribute_value(user["id"], "invite_org_role", role)
-        return f"Invitation email sent successfully"
+        if status_code == 204:
+            return f"Email not sent"
+        else:
+            return f"Invitation email sent successfully"
     else:
         return {"error": "Failed to send invitation email"}, 500
 
