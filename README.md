@@ -37,8 +37,19 @@ To run/dev tests locally, start the backing services (postgres, keycloak) using 
 docker compose up
 ```
 
+Wait for the services to be ready
+
 and run tests
 
 ```
 pytest
 ```
+
+
+### Pytest
+
+- fixtures go in conftest.py
+- fixtures are invoked as argument names to test functions
+- test module names start with test_
+- fixtures can clean up by yielding their value - pytest will call next to invoke the cleanup
+  code after the fixture's scope ends.
