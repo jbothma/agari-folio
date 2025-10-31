@@ -226,7 +226,6 @@ class KeycloakAuth:
 
                 if user_info_raw and 'error' not in user_info_raw:
                     user_info = extract_user_info(user_info_raw)
-                    print(user_info)
                     for role in ["project-admin", "project-contributor", "project-viewer"]:
                         if user_info.get("attributes"):
                             projects_ids.extend(user_info["attributes"].get(role, []))
