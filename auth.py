@@ -211,6 +211,35 @@ class KeycloakAuth:
 
         return organisation_id
 
+
+    def get_user_projects(self):
+
+        """Extract and verify JWT token from Authorization header"""
+
+        projects_ids = []
+
+        auth_header = request.headers.get('Authorization')
+        if auth_header:
+            try:
+                token = auth_header.split(' ')[1]
+                user_info_raw = self.verify_token(token)
+
+                if user_info_raw and 'error' not in user_info_raw:
+                    user_info = extract_user_info(user_info_raw)
+                    print(user_info)
+                    for role in ["project-admin", "project-contributor", "project-viewer"]:
+                        if user_info.get("attributes"):
+                            projects_ids.extend(user_info["attributes"].get(role, []))
+                else:
+                    print(f"Token verification failed: {user_info_raw}")
+            except Exception as e:
+                print(f"Authentication failed: {str(e)}")
+                pass
+        else:
+            print(f"No Authorization header found")
+
+        return projects_ids
+
     ### GET USERS BY ATTRIBUTE ###
 
     def get_users_by_attribute(self, attribute_name, attribute_value, exact_match=True):
