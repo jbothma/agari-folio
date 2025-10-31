@@ -1,7 +1,8 @@
 # @folio = http://localhost:5000
 @folio = https://folio-staging.openup.org.za
 # @keycloak = http://keycloak.local
-@keycloak = https://keycloak-staging.openup.org.za
+# @keycloak = https://keycloak-staging.openup.org.za
+@keycloak = http://localhost:8080
 
 # @song = http://song.local
 @song = https://song-staging.openup.org.za
