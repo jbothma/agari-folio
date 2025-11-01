@@ -9,7 +9,6 @@ from auth import (
 )
 from permissions import PERMISSIONS
 from database import get_db_cursor, test_connection
-import os
 import json
 from datetime import datetime, date
 from decimal import Decimal
@@ -24,6 +23,14 @@ from helpers import (
     tsv_to_json,
 )
 import uuid
+from settings import (
+    KEYCLOAK_URL,
+    KEYCLOAK_REALM,
+    KEYCLOAK_CLIENT_ID,
+    KEYCLOAK_CLIENT_SECRET,
+    OVERTURE_SONG,
+    OVERTURE_SCORE
+)
 
 
 # Custom JSON encoder to handle datetime and other types
@@ -40,14 +47,14 @@ class CustomJSONEncoder(json.JSONEncoder):
 app = Flask(__name__)
 app.json_encoder = CustomJSONEncoder
 
-song = os.getenv('OVERTURE_SONG', 'http://song.local')
-score = os.getenv('OVERTURE_SCORE', 'http://score.local')
+song = OVERTURE_SONG
+score = OVERTURE_SCORE
 
 keycloak_auth = KeycloakAuth(
-    keycloak_url=os.getenv('KEYCLOAK_URL', 'http://keycloak.local'),
-    realm=os.getenv('KEYCLOAK_REALM', 'agari'),
-    client_id=os.getenv('KEYCLOAK_CLIENT_ID', 'dms'),
-    client_secret=os.getenv('KEYCLOAK_CLIENT_SECRET', 'VDyLEjGR3xDQvoQlrHq5AB6OwbW0Refc')
+    keycloak_url=KEYCLOAK_URL,
+    realm=KEYCLOAK_REALM,
+    client_id=KEYCLOAK_CLIENT_ID,
+    client_secret=KEYCLOAK_CLIENT_SECRET
 )
 
 app.keycloak_auth = keycloak_auth
@@ -2466,5 +2473,5 @@ class OrganisationInviteConfirm(Resource):
 
 
 if __name__ == '__main__':
-    port = int(os.getenv('PORT', 8000))
-    app.run(debug=True, host='0.0.0.0', port=port)
+    from settings import PORT
+    app.run(debug=True, host='0.0.0.0', port=PORT)
