@@ -1356,6 +1356,7 @@ class ProjectUsers(Resource):
     @require_auth(keycloak_auth)
     @require_permission('manage_project_users', resource_type='project', resource_id_arg='project_id')
     def post(self, project_id):
+
         """Add a user to a project with a specific role"""
 
         try:
@@ -1372,6 +1373,7 @@ class ProjectUsers(Resource):
 
             if not redirect_uri:
                 return {'error': 'redirect_uri is required for acceptance link'}, 400
+
             # Check if user exists in Keycloak
             user = keycloak_auth.get_user(user_id)
             if not user:

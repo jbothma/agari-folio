@@ -74,3 +74,6 @@ pytest
 - test module names start with test_
 - fixtures can clean up by yielding their value - pytest will call next to invoke the cleanup
   code after the fixture's scope ends.
+- pytest prints values in an assertion that fails, so you often don't have to explicitly print values.
+  If you're likely to need more detail, that can be passed as a second argument, e.g. `response.get_json()`
+- `pytest -v` gives a bit more detail of variable values when an assertion fails

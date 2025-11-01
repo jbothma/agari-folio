@@ -1,15 +1,19 @@
 """
 Pytest configuration and shared fixtures for tests.
+
+Fixture functions are named after the resource they provide.
 """
 import pytest
 import json
 import requests
 from auth import KeycloakAuth
 import settings
+import os
 
-settings.KEYCLOAK_URL = "http://localhost:8080"
-settings.DB_HOST = "localhost"
-settings.DB_PORT = 5434
+# Default to what we have in docker-compose.dev.yml but allow overriding using TEST_ env vars.
+settings.KEYCLOAK_URL = os.getenv("TEST_KEYCLOAK_URL", "http://localhost:8080")
+settings.DB_HOST = os.getenv("TEST_DB_HOST", "localhost")
+settings.DB_PORT = os.getenv("TEST_DB_PORT", 5434)
 # Import only after overriding service urls
 from app import app
 
@@ -35,32 +39,26 @@ def keycloak_auth():
 @pytest.fixture
 def system_admin_token():
     """Get access token for system admin user"""
-    token_url = f"{settings.KEYCLOAK_URL}/realms/{settings.KEYCLOAK_REALM}/protocol/openid-connect/token"
-    data = {
-        'username': 'system.admin@agari.tech',
-        'password': 'pass123',
-        'grant_type': 'password',
-        'client_id': settings.KEYCLOAK_CLIENT_ID,
-        'client_secret': settings.KEYCLOAK_CLIENT_SECRET
-    }
-    response = requests.post(token_url, data=data)
-    assert response.status_code == 200, f"Failed to get system admin token: {response.text}"
-    return response.json()['access_token']
+    return keycloak_password_auth('system.admin@agari.tech', 'pass123')
 
 
 @pytest.fixture
 def org1_admin_token():
     """Get access token for org admin user (org1)"""
+    return keycloak_password_auth('org-admin@org1.ac.za', 'pass123')
+
+
+def keycloak_password_auth(username, password):
     token_url = f"{settings.KEYCLOAK_URL}/realms/{settings.KEYCLOAK_REALM}/protocol/openid-connect/token"
     data = {
-        'username': 'org-admin@org1.ac.za',
-        'password': 'pass123',
+        'username': username,
+        'password': password,
         'grant_type': 'password',
         'client_id': settings.KEYCLOAK_CLIENT_ID,
         'client_secret': settings.KEYCLOAK_CLIENT_SECRET
     }
     response = requests.post(token_url, data=data)
-    assert response.status_code == 200, f"Failed to get org admin token: {response.text}"
+    assert response.status_code == 200, f"Failed to get user token: {response.text}"
     return response.json()['access_token']
 
 
