@@ -51,6 +51,10 @@ python app.py
 
 ## Tests
 
+```
+pip install -r requirements_test.txt
+```
+
 To run/dev tests locally, start the backing services (postgres, keycloak) using docker-compose, then configure your environment variables for folio to speak to them.
 
 
