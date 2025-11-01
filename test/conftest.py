@@ -6,6 +6,7 @@ Fixture functions are named after the resource they provide.
 import pytest
 import json
 import requests
+import requests_mock as rm
 from auth import KeycloakAuth
 import settings
 import os
@@ -16,6 +17,19 @@ settings.DB_HOST = os.getenv("TEST_DB_HOST", "localhost")
 settings.DB_PORT = os.getenv("TEST_DB_PORT", 5434)
 # Import only after overriding service urls
 from app import app
+
+
+@pytest.fixture
+def requests_mock():
+    """
+    Custom requests_mock fixture configured to allow real HTTP for unmocked URLs.
+
+    This allows Keycloak authentication requests to work with the real test service
+    while mocking SONG API calls. Only explicitly registered URLs will be mocked;
+    all other HTTP requests will pass through normally.
+    """
+    with rm.Mocker(real_http=True) as m:
+        yield m
 
 
 @pytest.fixture
