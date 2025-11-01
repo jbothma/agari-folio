@@ -2,11 +2,12 @@
 
 # Agari-Folio
 
+Agari-Folio adds Agari features to Overture Genomics Data stack, providing robust project management and granular role-based access control for genomics data workflows.
+
 ![Overture Genomics Data Stack](overture-stack.svg)
 
-Agari-Folio is a core service in the Overture Genomics Data stack, providing robust project management and granular role-based access control for genomics data workflows.
-
 ## Features
+
 - Project and study management
 - Fine-grained permissions and roles
 - Organization and user management
@@ -27,6 +28,26 @@ Replace `<your-host>` and `<port>` with your deployment details.
 ## Proxy for Overture Services SONG and SCORE
 
 This service also acts as a proxy for the Overture services SONG and SCORE, facilitating secure and authenticated access to these services through Agari-Folio's permission system.
+
+## Development
+
+Create a virtual environment and activate it.
+
+Install python dependencies:
+
+```
+pip install -U  --upgrade-strategy=eager -r requirements.txt
+```
+
+Install [mjml](https://documentation.mjml.io/#installation)
+
+Configure environment variables for accessing backing services (see settings.py)
+
+Run folio
+
+```
+python app.py
+```
 
 ## Tests
 
