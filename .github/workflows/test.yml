@@ -56,14 +56,6 @@ jobs:
     - name: Install MJML
       run: npm install -g mjml
 
-    - name: Set environment variables
-      run: |
-        echo "DB_HOST=localhost" >> $GITHUB_ENV
-        echo "DB_PORT=5434" >> $GITHUB_ENV
-        echo "DB_NAME=folio" >> $GITHUB_ENV
-        echo "DB_USER=admin" >> $GITHUB_ENV
-        echo "DB_PASSWORD=folio-db-pass-123" >> $GITHUB_ENV
-
     - name: Run tests
       run: |
         pytest -v
