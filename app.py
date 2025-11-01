@@ -180,6 +180,7 @@ class PermissionsCheckResource(Resource):
                 'details': details
             }
         except Exception as e:
+            logger.exception(f"Error checking permission: {str(e)}")
             return {'error': f'Failed to check permission: {str(e)}'}, 500
 
 
@@ -229,6 +230,7 @@ class PathogenList(Resource):
                 return pathogens
 
         except Exception as e:
+            logger.exception(f"Error retrieving pathogens: {str(e)}")
             return {'error': f'Database error: {str(e)}'}, 500
 
 
@@ -272,6 +274,7 @@ class PathogenList(Resource):
         except Exception as e:
             if 'duplicate key value violates unique constraint' in str(e):
                 return {'error': f'Pathogen with name "{name}" already exists'}, 409
+            logger.exception(f"Error creating pathogen: {str(e)}")
             return {'error': f'Database error: {str(e)}'}, 500
 
 @pathogen_ns.route('/<string:pathogen_id>')
@@ -300,6 +303,7 @@ class Pathogen(Resource):
                 return pathogen
                 
         except Exception as e:
+            logger.exception(f"Error retrieving pathogen {pathogen_id}: {str(e)}")
             return {'error': f'Database error: {str(e)}'}, 500
         
     ### DELETE /pathogens/<pathogen_id> ###
@@ -356,6 +360,7 @@ class Pathogen(Resource):
                     }
                 
         except Exception as e:
+            logger.exception(f"Error deleting pathogen {pathogen_id}: {str(e)}")
             return {'error': f'Database error: {str(e)}'}, 500
         
     ### PUT /pathogens/<pathogen_id> ###
@@ -402,6 +407,7 @@ class Pathogen(Resource):
         except Exception as e:
             if 'duplicate key value violates unique constraint' in str(e):
                 return {'error': f'Pathogen with name "{name}" already exists'}, 409
+            logger.exception(f"Error updating pathogen {pathogen_id}: {str(e)}")
             return {'error': f'Database error: {str(e)}'}, 500
 
 
@@ -439,6 +445,7 @@ class PathogenRestore(Resource):
         except Exception as e:
             if 'duplicate key value violates unique constraint' in str(e):
                 return {'error': 'Cannot restore: A pathogen with this name already exists'}, 409
+            logger.exception(f"Error restoring pathogen {pathogen_id}: {str(e)}")
             return {'error': f'Database error: {str(e)}'}, 500
 
 ##########################
@@ -461,6 +468,7 @@ class UserList(Resource):
             users = keycloak_auth.get_all_users()
             return users
         except Exception as e:
+            logger.exception(f"Error retrieving users: {str(e)}")
             return {'error': f'Failed to retrieve users: {str(e)}'}, 500
 
     ### POST /users ###
@@ -517,6 +525,7 @@ class User(Resource):
             return user_info
             
         except Exception as e:
+            logger.exception(f"Error retrieving user {user_id}: {str(e)}")
             return {'error': f'Failed to retrieve user: {str(e)}'}, 500
 
     ### DELETE /users/<user_id> ###
@@ -532,6 +541,7 @@ class User(Resource):
             access_revoked_notification(user_id)
             return {'message': 'User deleted successfully'}, 204
         except Exception as e:
+            logger.exception(f"Error deleting user {user_id}: {str(e)}")
             return {'error': f'Failed to delete user: {str(e)}'}, 500
         
     ### PUT /users/<user_id> ###
@@ -611,6 +621,7 @@ class User(Resource):
                 }, 500
                 
         except Exception as e:
+            logger.exception(f"Error updating user {user_id}: {str(e)}")
             return {'error': f'Failed to update user: {str(e)}'}, 500
 
 ##########################
@@ -641,6 +652,7 @@ class OrganisationList(Resource):
                 return organisations
 
         except Exception as e:
+            logger.exception(f"Error retrieving organisations: {str(e)}")
             return {'error': f'Database error: {str(e)}'}, 500
         
 
@@ -684,6 +696,7 @@ class OrganisationList(Resource):
         except Exception as e:
             if 'duplicate key value violates unique constraint' in str(e):
                 return {'error': f'Organisation with name "{name}" already exists'}, 409
+            logger.exception(f"Error creating organisation: {str(e)}")
             return {'error': f'Database error: {str(e)}'}, 500
 
     
@@ -714,6 +727,7 @@ class Organisation(Resource):
                 return organisation
                 
         except Exception as e:
+            logger.exception(f"Error retrieving organisation {org_id}: {str(e)}")
             return {'error': f'Database error: {str(e)}'}, 500
         
     ### PUT /organisations/<id> ###
@@ -793,6 +807,7 @@ class Organisation(Resource):
         except Exception as e:
             if 'duplicate key value violates unique constraint' in str(e):
                 return {'error': f'Organisation name already exists'}, 409
+            logger.exception(f"Error updating organisation {org_id}: {str(e)}")
             return {'error': f'Database error: {str(e)}'}, 500
         
     ### DELETE /organisations/<id> ###
@@ -821,6 +836,7 @@ class Organisation(Resource):
                 }, 204
                 
         except Exception as e:
+            logger.exception(f"Error deleting organisation {org_id}: {str(e)}")
             return {'error': f'Database error: {str(e)}'}, 500
 
         
@@ -841,6 +857,7 @@ class OrganisationUsers(Resource):
             users = keycloak_auth.get_users_by_attribute('organisation_id', org_id)
             return users
         except Exception as e:
+            logger.exception(f"Error retrieving organisation members for {org_id}: {str(e)}")
             return {'error': f'Failed to retrieve users: {str(e)}'}, 500
         
     
@@ -893,6 +910,7 @@ class OrganisationUsers(Resource):
             return response
             
         except Exception as e:
+            logger.exception(f"Error adding user to organisation {org_id}: {str(e)}")
             return {'error': f'Failed to add user to organisation: {str(e)}'}, 500
 
 
@@ -1026,6 +1044,7 @@ class ProjectList(Resource):
                 }
 
         except Exception as e:
+            logger.exception(f"Error retrieving projects: {str(e)}")
             return {'error': f'Database error: {str(e)}'}, 500
         
     ### POST /projects ###
@@ -1088,6 +1107,7 @@ class ProjectList(Resource):
         except Exception as e:
             if 'duplicate key value violates unique constraint' in str(e):
                 return {'error': f'Project with name "{name}" already exists'}, 409
+            logger.exception(f"Error creating project: {str(e)}")
             return {'error': f'Database error: {str(e)}'}, 500
 
 
@@ -1131,6 +1151,7 @@ class Project(Resource):
                     return project
 
         except Exception as e:
+            logger.exception(f"Error retrieving project {project_id}: {str(e)}")
             return {'error': f'Database error: {str(e)}'}, 500
         
     ### PUT /projects/<project_id> ###    
@@ -1205,6 +1226,7 @@ class Project(Resource):
         except Exception as e:
             if 'duplicate key value violates unique constraint' in str(e):
                 return {'error': f'Project name already exists'}, 409
+            logger.exception(f"Error updating project {project_id}: {str(e)}")
             return {'error': f'Database error: {str(e)}'}, 500
         
 
@@ -1263,6 +1285,7 @@ class Project(Resource):
                     }
                 
         except Exception as e:
+            logger.exception(f"Error deleting project {project_id}: {str(e)}")
             return {'error': f'Database error: {str(e)}'}, 500
 
 @project_ns.route('/<string:project_id>/restore')
@@ -1298,6 +1321,7 @@ class ProjectRestore(Resource):
         except Exception as e:
             if 'duplicate key value violates unique constraint' in str(e):
                 return {'error': 'Cannot restore: A project with this name already exists'}, 409
+            logger.exception(f"Error restoring project {project_id}: {str(e)}")
             return {'error': f'Database error: {str(e)}'}, 500
 
 
@@ -1347,6 +1371,7 @@ class ProjectUsers(Resource):
                 'total_users': len(project_admins) + len(project_contributors) + len(project_viewers)
             }
         except Exception as e:
+            logger.exception(f"Error retrieving users for project {project_id}: {str(e)}")
             return {'error': f'Failed to retrieve project users: {str(e)}'}, 500
     
     ### POST /projects/<project_id>/users ###
@@ -1425,6 +1450,7 @@ class DeleteProjectUsers(Resource):
             }, 200
 
         except Exception as e:
+            logger.exception(f"Error removing user from project: {str(e)}")
             return {'error': f'Failed to remove user from project: {str(e)}'}, 500
 
 
@@ -1468,6 +1494,7 @@ class ProjectSubmissions(Resource):
                     'submissions': submissions
                 }
         except Exception as e:
+            logger.exception(f"Error retrieving submissions for project {project_id}: {str(e)}")
             return {'error': f'Database error: {str(e)}'}, 500
         
     
@@ -1546,7 +1573,7 @@ class ProjectSubmissions(Resource):
                 except UnicodeDecodeError:
                     return {'error': 'File must be UTF-8 encoded'}, 400
                 except Exception as e:
-                    print(f"Error processing TSV: {str(e)}")
+                    logger.exception(f"Error processing TSV: {str(e)}")
                     return {'error': f'Failed to process TSV file: {str(e)}'}, 500
             else:
                 print("No file upload detected, checking for JSON body")
@@ -1600,6 +1627,7 @@ class ProjectSubmissions(Resource):
             return response_data, song_response.status_code
 
         except Exception as e:
+            logger.exception(f"Error submitting analysis for project {project_id}: {str(e)}")
             return {'error': f'Failed to submit analysis: {str(e)}'}, 500
         
 
@@ -1674,6 +1702,7 @@ class ProjectSubmission(Resource):
 
                 return submission
         except Exception as e:
+            logger.exception(f"Error retrieving submission {submission_id} for project {project_id}: {str(e)}")
             return {'error': f'Database error: {str(e)}'}, 500
 
 
@@ -1729,6 +1758,7 @@ class ProjectSubmissionUploadInit(Resource):
             return init_response.json(), 200
 
         except Exception as e:
+            logger.exception(f"Error initializing upload for submission {submission_id}: {str(e)}")
             log_submission(submission_id, request.user.get('user_id'), 500, f'Failed to initialize upload: {str(e)}')
             return {'error': f'Failed to initialize upload: {str(e)}'}, 500
 
@@ -1800,6 +1830,7 @@ class ProjectSubmissionUploadFinalisePart(Resource):
             }, 200
 
         except Exception as e:
+            logger.exception(f"Error finalising part upload for submission {submission_id}: {str(e)}")
             log_submission(submission_id, request.user.get('user_id'), 500, f'{str(e)}')
             return {'error': f'Failed to finalise part upload: {str(e)}'}, 500
 
@@ -1885,6 +1916,7 @@ class ProjectSubmissionUploadFinalise(Resource):
             return response_data, 200
 
         except Exception as e:
+            logger.exception(f"Error finalising upload for submission {submission_id}: {str(e)}")
             log_submission(submission_id, request.user.get('user_id'), 500, f'{str(e)}')
             return {'error': f'Failed to finalise upload: {str(e)}'}, 500
         
@@ -1955,6 +1987,7 @@ class PublishSubmission(Resource):
             return response_data, song_response.status_code
 
         except Exception as e:
+            logger.exception(f"Error publishing submission {submission_id} for project {project_id}: {str(e)}")
             log_submission(submission_id, request.user.get('user_id'), 500, f'{str(e)}')
             return {'error': f'Failed to publish analysis: {str(e)}'}, 500
 
@@ -2025,6 +2058,7 @@ class UnpublishSubmission(Resource):
             return response_data, song_response.status_code
 
         except Exception as e:
+            logger.exception(f"Error unpublishing submission {submission_id} for project {project_id}: {str(e)}")
             log_submission(submission_id, request.user.get('user_id'), 500, f'{str(e)}')
             return {'error': f'Failed to unpublish analysis: {str(e)}'}, 500
         
@@ -2064,6 +2098,7 @@ class StudyList(Resource):
                 return studies
 
         except Exception as e:
+            logger.exception("Error retrieving studies")
             return {'error': f'Database error: {str(e)}'}, 500
 
     ### POST /studies ###
@@ -2199,11 +2234,13 @@ class StudyAnalysis(Resource):
             try:
                 response_data = song_response.json()
             except:
+                logger.exception("Error parsing SONG response")
                 response_data = {'message': song_response.text}
             
             return response_data, song_response.status_code
 
         except Exception as e:
+            logger.exception("Error retrieving analysis")
             return {'error': f'Failed to retrieve analysis results: {str(e)}'}, 500
 
 @study_ns.route('/<string:project_id>/<string:study_id>/analysis/<string:analysis_id>/upload')
@@ -2339,6 +2376,7 @@ class StudyAnalysisUpload(Resource):
             }, 200
 
         except Exception as e:
+            logger.exception(f"Error uploading file to analysis {analysis_id} in study {study_id}: {str(e)}")
             return {'error': f'Failed to upload file: {str(e)}'}, 500
         
 
