@@ -8,7 +8,9 @@ from auth import KeycloakAuth
 import settings
 
 settings.KEYCLOAK_URL = "http://localhost:8080"
-# Import only after overriding keycloak url
+settings.DB_HOST = "localhost"
+settings.DB_PORT = 5434
+# Import only after overriding service urls
 from app import app
 
 
