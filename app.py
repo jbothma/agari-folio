@@ -2153,6 +2153,7 @@ class StudyList(Resource):
         except Exception as e:
             if 'duplicate key value violates unique constraint' in str(e):
                 return {'error': f'Study with name "{name}" already exists'}, 409
+            logger.exception("Error creating study")
             return {'error': f'Database error: {str(e)}'}, 500
 
 @study_ns.route('/<string:study_id>/analysis')

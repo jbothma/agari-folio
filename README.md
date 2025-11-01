@@ -66,6 +66,14 @@ and run tests
 pytest
 ```
 
+Fixtures will try to clean up what they create, but this can fail if there are errors, leaving
+the database in a bad state. You can clean this up using a database client, or by dropping the
+docker-compose volumes with `docker compose down --volumes` and creating fresh instances.
+
+Tests should try to clean up what isn't managed
+by fixtures, e.g. with a `try ... finally`. One day perhaps the transaction management can be plugged
+into flask so that the test client can abort a transaction wrapping the request.
+
 
 ### Pytest
 
