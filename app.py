@@ -23,14 +23,14 @@ from helpers import (
     tsv_to_json,
 )
 import uuid
-from settings import (
-    KEYCLOAK_URL,
-    KEYCLOAK_REALM,
-    KEYCLOAK_CLIENT_ID,
-    KEYCLOAK_CLIENT_SECRET,
-    OVERTURE_SONG,
-    OVERTURE_SCORE
-)
+import settings  # module import allows override via conftest.py
+from logging import getLogger
+
+SONG_URL = settings.OVERTURE_SONG
+SCORE_URL = settings.OVERTURE_SCORE
+
+logger = getLogger(__name__)
+
 
 
 # Custom JSON encoder to handle datetime and other types
@@ -47,14 +47,12 @@ class CustomJSONEncoder(json.JSONEncoder):
 app = Flask(__name__)
 app.json_encoder = CustomJSONEncoder
 
-song = OVERTURE_SONG
-score = OVERTURE_SCORE
-
+print("app", settings.KEYCLOAK_URL)
 keycloak_auth = KeycloakAuth(
-    keycloak_url=KEYCLOAK_URL,
-    realm=KEYCLOAK_REALM,
-    client_id=KEYCLOAK_CLIENT_ID,
-    client_secret=KEYCLOAK_CLIENT_SECRET
+    keycloak_url=settings.KEYCLOAK_URL,
+    realm=settings.KEYCLOAK_REALM,
+    client_id=settings.KEYCLOAK_CLIENT_ID,
+    client_secret=settings.KEYCLOAK_CLIENT_SECRET
 )
 
 app.keycloak_auth = keycloak_auth
@@ -310,7 +308,6 @@ class Pathogen(Resource):
     @require_auth(keycloak_auth)
     @require_permission('create_pathogen')
     def delete(self, pathogen_id):
-
         """Delete a pathogen by ID (system-admin only)
         
         Query Parameters: 
@@ -1353,7 +1350,7 @@ class ProjectUsers(Resource):
             return {'error': f'Failed to retrieve project users: {str(e)}'}, 500
     
     ### POST /projects/<project_id>/users ###
-    ### Body: { "user_id": "<keycloak_user_id>", "role": "project-admin|project-contributor|project-viewer" } ###
+    ### Body: { "user_id": "<keycloak_user_id>", "role": "project-admin|project-contributor|project-viewer", "redirect_uri": "<redirect_uri>" } ###
     
     @api.doc('add_project_user')
     @require_auth(keycloak_auth)
@@ -1384,6 +1381,7 @@ class ProjectUsers(Resource):
             response = invite_user_to_project(user, redirect_uri, project_id, role)
             return response
         except Exception as e:
+            logger.exception(f"Error adding user to project: {str(e)}")
             return {'error': f'Failed to add user to project: {str(e)}'}, 500
 
 
@@ -1570,7 +1568,7 @@ class ProjectSubmissions(Resource):
             }
             
             # Forward the request to SONG
-            song_submit_url = f"{song}/submit/{metadata['studyId']}?allowDuplicates=true"
+            song_submit_url = f"{SONG_URL}/submit/{metadata['studyId']}?allowDuplicates=true"
             song_response = requests.post(song_submit_url, headers=song_headers, json=data)
 
             print(f"SONG submit response status: {song_response.status_code}")
@@ -1668,7 +1666,7 @@ class ProjectSubmission(Resource):
                         'Content-Type': 'application/json'
                     }
 
-                    song_response = requests.get(f"{song}/studies/{study_id}/analysis/{analysis_id}", headers=song_headers)
+                    song_response = requests.get(f"{SONG_URL}/studies/{study_id}/analysis/{analysis_id}", headers=song_headers)
 
                     if song_response.status_code == 200:
                         song_data = song_response.json()
@@ -1714,7 +1712,7 @@ class ProjectSubmissionUploadInit(Resource):
             }
 
             # Initialize upload with SCORE
-            init_upload_url = f"{score}/upload/{object_id}/uploads"
+            init_upload_url = f"{SCORE_URL}/upload/{object_id}/uploads"
             init_data = {
                 'fileSize': file_size,
                 'md5': file_md5,
@@ -1772,7 +1770,7 @@ class ProjectSubmissionUploadFinalisePart(Resource):
             }
 
             # Finalise part upload
-            finalise_part_url = f"{score}/upload/{object_id}/parts"
+            finalise_part_url = f"{SCORE_URL}/upload/{object_id}/parts"
             finalise_part_params = {
                 'partNumber': part_number,
                 'etag': etag,
@@ -1845,7 +1843,7 @@ class ProjectSubmissionUploadFinalise(Resource):
             }
 
             # Finalize complete upload
-            finalize_upload_url = f"{score}/upload/{object_id}"
+            finalize_upload_url = f"{SCORE_URL}/upload/{object_id}"
             finalize_upload_params = {'uploadId': upload_id}
             
             # Include parts data in the request body if provided
@@ -1938,7 +1936,7 @@ class PublishSubmission(Resource):
             }
 
             # Forward the publish request to SONG
-            song_publish_url = f"{song}/studies/{study_id}/analysis/publish/{analysis_id}"
+            song_publish_url = f"{SONG_URL}/studies/{study_id}/analysis/publish/{analysis_id}"
             song_response = requests.put(song_publish_url, headers=song_headers)
 
             print(f"SONG publish response status: {song_response.status_code}")
@@ -2008,7 +2006,7 @@ class UnpublishSubmission(Resource):
             }
 
             # Forward the unpublish request to SONG
-            song_unpublish_url = f"{song}/studies/{study_id}/analysis/unpublish/{analysis_id}"
+            song_unpublish_url = f"{SONG_URL}/studies/{study_id}/analysis/unpublish/{analysis_id}"
             song_response = requests.put(song_unpublish_url, headers=song_headers)
 
             print(f"SONG unpublish response status: {song_response.status_code}")
@@ -2108,7 +2106,7 @@ class StudyList(Resource):
                 'Content-Type': 'application/json'
             }
             
-            song_check_url = f"{song}/studies/{studyId}"
+            song_check_url = f"{SONG_URL}/studies/{studyId}"
             app.logger.info(f"Checking SONG for existing studyId at {song_check_url} ...")
             song_response = requests.get(song_check_url, headers=song_headers)
     
@@ -2122,7 +2120,7 @@ class StudyList(Resource):
                 return {'error': f'Error checking study in SONG: {song_response.status_code} - {song_response.text}'}, 500
     
             ### CREATE STUDY IN SONG ###
-            song_create_url = f"{song}/studies/{studyId}/"
+            song_create_url = f"{SONG_URL}/studies/{studyId}/"
             song_payload = {
                 'studyId': studyId,
                 'name': name,
@@ -2188,9 +2186,9 @@ class StudyAnalysis(Resource):
             }
 
             if states:
-                song_analysis_url = f"{song}/studies/{study_id}/analysis?analysisStates={states}"
+                song_analysis_url = f"{SONG_URL}/studies/{study_id}/analysis?analysisStates={states}"
             else:
-                song_analysis_url = f"{song}/studies/{study_id}/analysis"
+                song_analysis_url = f"{SONG_URL}/studies/{study_id}/analysis"
 
             song_response = requests.get(song_analysis_url, headers=song_headers)
 
@@ -2257,7 +2255,7 @@ class StudyAnalysisUpload(Resource):
             }
 
             # Step 1: Initialize upload with SCORE
-            init_upload_url = f"{score}/upload/{object_id}/uploads"
+            init_upload_url = f"{SCORE_URL}/upload/{object_id}/uploads"
             init_data = {
                 'fileSize': file_size,
                 'md5': file_md5,
@@ -2287,7 +2285,7 @@ class StudyAnalysisUpload(Resource):
             app.logger.info(f"File uploaded to MinIO - ETag: {etag}")
 
             # Step 3: Finalize part upload
-            finalize_part_url = f"{score}/upload/{object_id}/parts"
+            finalize_part_url = f"{SCORE_URL}/upload/{object_id}/parts"
             finalize_part_params = {
                 'partNumber': 1,
                 'etag': etag,
@@ -2312,7 +2310,7 @@ class StudyAnalysisUpload(Resource):
             app.logger.info("Part upload finalized")
 
             # Step 4: Finalize complete upload
-            finalize_upload_url = f"{score}/upload/{object_id}"
+            finalize_upload_url = f"{SCORE_URL}/upload/{object_id}"
             finalize_upload_params = {'uploadId': upload_id}
             
             finalize_upload_response = requests.post(
